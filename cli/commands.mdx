@@ -1,5 +1,5 @@
 ---
-title: "ankara CLI Command Reference"
+title: "ankara CLI Commands: Flags, Arguments, and Examples"
 sidebarTitle: "Commands"
 description: "Full reference for every ankara CLI command — flags, arguments, and example output for init, deploy, mint, escrow, ramp, and more."
 ---
@@ -53,11 +53,15 @@ If `ankara.config.json` already exists, the wizard asks whether to reinitialise.
 
 ### `ankara deploy-factory`
 
-Prints the Hardhat (EVM) or Stellar CLI commands you need to run in order to deploy the full Ankara Chain contract suite — `TokenFactory`, `NFTFactory`, `MultiTokenFactory`, `EscrowFactory`, `RampSettlementFactory`, and `FactoryRegistry` — to the configured network.
+Prints the Hardhat (EVM) or Stellar CLI commands you need to run to deploy the full Ankara Chain contract suite — `TokenFactory`, `NFTFactory`, `MultiTokenFactory`, `EscrowFactory`, `RampSettlementFactory`, and `FactoryRegistry` — to the configured network.
 
 ```bash
 ankara deploy-factory
 ```
+
+<Note>
+This command prints deployment instructions rather than deploying directly. You will need a local copy of the [ankara-core contracts repository](https://github.com/ankarachain/ankara-core) to run the printed Hardhat or Stellar CLI commands. After deploying, paste the resulting `TokenFactory` address into `ankara.config.json` as `"factoryAddress"`.
+</Note>
 
 **Example output (EVM)**
 
@@ -80,10 +84,6 @@ ankara deploy-factory
   Then paste the TokenFactory address back into ankara.config.json
   or re-run: npx ankara init
 ```
-
-<Note>
-After the Hardhat script completes, copy the printed `TokenFactory` address into `ankara.config.json` as `"factoryAddress"` before running `ankara deploy`.
-</Note>
 
 ---
 
@@ -244,7 +244,7 @@ ankara deploy-batch
 
 | Prompt | Description |
 |---|---|
-| Collection name | Human-readable name for the warehouse contract |
+| Warehouse name | Human-readable name for the warehouse contract |
 | Country code | ISO 3166-1 alpha-2 |
 | Base IPFS URI | Metadata URI prefix, e.g. `ipfs://Qm.../` |
 | Warehouse ID | Unique identifier for the storage facility |
@@ -273,7 +273,7 @@ ankara deploy-pool
 | Asset ID | Unique string identifier |
 | Country code | ISO 3166-1 alpha-2 |
 | Oracle address | Optional `ManualOracle` address for on-chain pricing |
-| Management fee (bps) | Annual fee in basis points, e.g. `100` = 1% (default `0`) |
+| Management fee (bps) | Annual fee in basis points, e.g. `100` = 1% (default `50` = 0.5%/yr) |
 
 ---
 
@@ -348,13 +348,13 @@ ankara batch-mint
 
 ### `ankara transfer`
 
-Transfers ERC-20 RWA tokens from your deployer wallet to another address.
+Transfers tokens from your deployer wallet to another address. The CLI auto-detects whether the contract is an ERC-20 fungible token or an ERC-721 NFT (via ERC-165) and adjusts the prompts accordingly. On Stellar networks, you choose the asset type manually.
 
 ```bash
 ankara transfer
 ```
 
-**Interactive prompts**: contract address, recipient address, amount.
+**Interactive prompts**: contract address; then recipient address and amount (fungible), or recipient address and token ID (NFT).
 
 ---
 
@@ -394,7 +394,19 @@ Registers a new commodity batch on an existing `CommodityBatchToken` (ERC-1155) 
 ankara register-batch
 ```
 
-**Interactive prompts**: contract address, commodity type, quantity (kg), grade, warehouse details, expiry date.
+**Interactive prompts**
+
+| Prompt | Description |
+|---|---|
+| CommodityBatchToken address | The ERC-1155 contract to register on |
+| Batch ID | Integer token ID for this batch |
+| Commodity type | e.g. `cocoa`, `maize` |
+| Quantity (kg) | Weight of goods in this batch |
+| Grade classification | e.g. `Grade A` |
+| Harvest season | e.g. `2025-Q1` |
+| Origin country code | ISO 3166-1 alpha-2, e.g. `NG` |
+| Valuation USD | Estimated value in USD |
+| Expiry unix timestamp | Unix timestamp when the batch expires |
 
 ---
 
@@ -735,7 +747,7 @@ Pushes a new price value to your deployed `ManualOracle` contract. Use this in d
 ankara oracle-set
 ```
 
-**Prompts**: oracle contract address, asset identifier, price (in USD, scaled to 18 decimals).
+**Prompts**: oracle contract address, token address to price, price in USD (e.g. `1.50`).
 
 ---
 

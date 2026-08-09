@@ -1,7 +1,7 @@
 ---
-title: "Deploy Your First RWA Token on Stellar"
+title: "Stellar Quickstart: Deploy Your First RWA Token on Stellar"
 sidebarTitle: "Stellar Quickstart"
-description: "Learn how to deploy a tokenized real-world asset on Stellar testnet using Soroban contracts and the Ankara Chain TypeScript SDK."
+description: "Deploy a tokenized real-world asset on Stellar Testnet using Soroban smart contracts and the Ankara Chain SDK — same API as EVM, no Solidity required."
 ---
 
 This guide walks you through deploying a tokenized RWA on Stellar Testnet using Soroban smart contracts and the Ankara Chain SDK. The Stellar path uses the same `TokenFactory` API as the EVM quickstart — only the config changes. By the end you will have a deployed Soroban token contract, minted fractional shares to a testnet account, and a working milestone escrow deal demonstrating Stellar's on-chain payment primitive.
@@ -97,7 +97,7 @@ This guide walks you through deploying a tokenized RWA on Stellar Testnet using 
     | Collateral Vault | `CDIUS3CGVFJONWUK3SCK4RFFONENSJ6QRZLNOHHO7EMVPZCCQ3IUSVNB` |
 
     <Note>
-      If you need isolated factory contracts under your own deployer key — for example, to run a whitelisted identity verifier that only your app controls — you can deploy your own factories by running `./scripts/deploy-testnet.sh deployer` from `packages/contracts-stellar`. See [Stellar Contracts](/contracts/stellar) for instructions.
+      If you need isolated factory contracts under your own deployer key — for example, to run a whitelisted identity verifier that only your app controls — you can deploy your own Soroban factories from the open-source contracts. See [Stellar Contracts](/contracts/stellar) for instructions.
     </Note>
   </Step>
 
@@ -190,7 +190,7 @@ const result = await factory.deployFarmland({
     irrigationType:    "rain-fed",
     cropHistory:       "maize,sorghum,fallow",
     titleDocumentHash: "0x0000000000000000000000000000000000000000000000000000000000000000",
-    valuationUSD:      BigInt("50000000000000000000000"),
+    valuationUSD:      BigInt(50000),
     stateRegion:       "Kano State",
     lastUpdated:       BigInt(Math.floor(Date.now() / 1000)),
   },
@@ -238,23 +238,26 @@ const factory = new TokenFactory({
 
 ```typescript
 import { TokenFactory } from "@ankarachain/sdk";
-import { ethers } from "ethers";
+
+// Zero-hash constant for empty description fields (no ethers.js needed on Stellar)
+const ZERO_HASH = "0x" + "00".repeat(32);
 
 const factory = new TokenFactory({
-  network:             "stellar-testnet",
-  stellarSecretKey:    process.env.STELLAR_SECRET_KEY!,
-  factoryAddress:      "CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF",
-  escrowFactoryAddress:"CDF5P3KOAU6RZGUSSA7KPNYEJMCBYAF5TVWELNFSVTM3TYP6EFUXRYVW",
+  network:              "stellar-testnet",
+  stellarSecretKey:     process.env.STELLAR_SECRET_KEY!,
+  factoryAddress:       "CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF",
+  escrowFactoryAddress: "CDF5P3KOAU6RZGUSSA7KPNYEJMCBYAF5TVWELNFSVTM3TYP6EFUXRYVW",
 });
 
+// Amounts use the token's decimal precision (XLM SAC = 7 decimals, so 1 XLM = 10_000_000n)
 const escrow = await factory.deployEscrow({
   payer:  "GPAYER_ADDRESS_HERE",
   payee:  "GPAYEE_ADDRESS_HERE",
   token:  "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC", // XLM SAC (testnet demo only)
   milestones: [
-    { amount: BigInt("10000000000000000000"), descriptionHash: ethers.ZeroHash },
-    { amount: BigInt("20000000000000000000"), descriptionHash: ethers.ZeroHash },
-    { amount: BigInt("20000000000000000000"), descriptionHash: ethers.ZeroHash },
+    { amount: BigInt(100_000_000), descriptionHash: ZERO_HASH }, // 10 XLM
+    { amount: BigInt(200_000_000), descriptionHash: ZERO_HASH }, // 20 XLM
+    { amount: BigInt(200_000_000), descriptionHash: ZERO_HASH }, // 20 XLM
   ],
   timelockDurationSeconds: 7 * 24 * 60 * 60, // 7 days
 });

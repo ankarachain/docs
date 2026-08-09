@@ -79,6 +79,26 @@ The constructor accepts a discriminated-union config. Set `network` to an EVM ne
   Soroban contract ID (starts with `"C..."`) for the token factory. Override only if you deploy your own factory instance.
 </ParamField>
 
+<ParamField path="nftFactoryAddress" type="string">
+  Override the default NFT factory Soroban contract ID.
+</ParamField>
+
+<ParamField path="escrowFactoryAddress" type="string">
+  Override the default `EscrowFactory` Soroban contract ID.
+</ParamField>
+
+<ParamField path="multiTokenFactoryAddress" type="string">
+  Override the default `MultiTokenFactory` Soroban contract ID.
+</ParamField>
+
+<ParamField path="rampSettlementFactoryAddress" type="string">
+  Override the default `RampSettlementFactory` Soroban contract ID.
+</ParamField>
+
+<ParamField path="rpcUrl" type="string">
+  Override the default Soroban RPC endpoint for the selected Stellar network.
+</ParamField>
+
 <Warning>
   **Never use `stellarSecretKey` in a browser.** The raw Stellar secret seed gives full control of the account. In any browser or mobile context, use `stellarSigner` with a SEP-43-compatible wallet like Freighter — the secret seed never needs to leave the wallet extension.
 </Warning>

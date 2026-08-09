@@ -1,5 +1,5 @@
 ---
-title: "How Ankara Chain Works: Architecture Overview"
+title: "Ankara Chain SDK Architecture: Layers and Adapters"
 sidebarTitle: "Architecture"
 description: "Understand the layered architecture of Ankara Chain — from your app layer down to smart contracts on EVM and Stellar, with the SDK in between."
 ---
@@ -46,10 +46,10 @@ The SDK uses an adapter pattern to stay chain-agnostic. Every chain-specific ope
 import { TokenFactory } from "@ankarachain/sdk";
 import { ethers } from "ethers";
 
-// EVM path — uses EVMAdapter internally
+// EVM path — TokenFactory selects the right adapter for the network
 const evmFactory = new TokenFactory({ network: "polygon", signer });
 
-// Stellar path — uses StellarAdapter internally
+// Stellar path — same API, different network config
 const stellarFactory = new TokenFactory({
   network: "stellar-testnet",
   stellarSecretKey: process.env.STELLAR_SECRET,

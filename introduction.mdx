@@ -71,7 +71,7 @@ Every module ships as part of the `@ankarachain/sdk` package and is MIT licensed
 
 | Module | Description |
 |--------|-------------|
-| **Token Factory** | Deploy RWA tokens from pre-audited ERC-20 templates. The `TokenFactory` class is your primary entry point — it handles provider setup, contract deployment, and result normalization across both EVM and Stellar adapters. |
+| **Token Factory** | Deploy RWA tokens from pre-audited ERC-20 templates. The `TokenFactory` class is your primary entry point — it handles provider setup, contract deployment, and result normalization across EVM chains and Stellar. |
 | **Asset Registry** | On-chain metadata schema and lifecycle management. Tracks each asset through `DRAFT → ACTIVE → SUSPENDED → REDEEMED/EXPIRED` states with the `AssetRegistry` class. |
 | **Transfer Engine** | Permissioned transfers, time-locks, and milestone-based escrow. The `MilestoneEscrow` contract lets you structure tranche payments tied to on-chain delivery confirmations. |
 | **Identity Hooks** | Pluggable KYC interface (`IIdentityVerifier`). Pass an `identityVerifier` address at deploy time to gate transfers behind your chosen verification provider without touching contract code. |
@@ -88,9 +88,10 @@ Every module ships as part of the `@ankarachain/sdk` package and is MIT licensed
 | **BNB Chain** | EVM | Mainnet; strong retail penetration across West Africa |
 | **Celo** | EVM | Mobile-first; stablecoin-native (cUSD, cEUR); optimized for low-data environments |
 | **Stellar** | Soroban | Soroban smart contracts; stablecoin rails via USDC/EURC anchors; full SDK feature parity with EVM chains |
+| **Localhost** | EVM (local) | Hardhat local node; use for unit tests and integration testing before deploying to a public testnet |
 
 <Note>
-  Testnet support is available for Polygon Amoy and Stellar Testnet. Use these for development and staging before deploying to mainnet. The CLI defaults to `polygon-amoy` when you run `ankara init`.
+  Testnet support is available for Polygon Amoy (`polygon-amoy`) and Stellar Testnet (`stellar-testnet`). Use these for development and staging before deploying to mainnet. The CLI defaults to `polygon-amoy` when you run `ankara init`.
 </Note>
 
 ---

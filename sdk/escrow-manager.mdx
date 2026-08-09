@@ -1,7 +1,7 @@
 ---
 title: "EscrowManager: Drive Milestone Escrow Contract Lifecycle"
 sidebarTitle: "EscrowManager"
-description: "EscrowManager reads and drives the lifecycle of a deployed MilestoneEscrow — funding milestones, marking delivery, approving releases, and handling disputes."
+description: "EscrowManager drives the lifecycle of a deployed MilestoneEscrow — fund milestones, mark delivery, approve releases, and handle disputes with arbitration."
 ---
 
 `EscrowManager` gives you a typed API for every operation on a deployed `MilestoneEscrow` contract. The payer funds individual milestones, the payee marks them delivered, and the payer approves release — with optional arbiter-driven dispute resolution and a timelock auto-release safety net. It works identically against both an EVM `MilestoneEscrow.sol` and a Soroban `milestone-escrow` contract — pass the appropriate adapter.

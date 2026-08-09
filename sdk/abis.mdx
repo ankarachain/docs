@@ -1,7 +1,7 @@
 ---
-title: "Contract ABIs Exported from @ankarachain/sdk"
+title: "Contract ABI Constants Reference for @ankarachain/sdk"
 sidebarTitle: "ABIs"
-description: "@ankarachain/sdk exports TypeChain-generated ABIs for all Ankara Chain contracts, ready to use with ethers.js v6 for direct contract interaction."
+description: "@ankarachain/sdk exports typed ABI constants for all Ankara Chain contracts — use with ethers.js v6 for on-chain reads, writes, and event subscriptions."
 ---
 
 For most workflows you will never touch an ABI directly — the SDK's high-level classes (`TokenFactory`, `AssetRegistry`, `EscrowManager`, etc.) handle contract interaction on your behalf. However, there are scenarios where you need raw ABI access: building a custom UI that reads contract state directly, integrating with a wallet library that expects ABI fragments, writing scripts that call contract functions not yet surfaced by the SDK, or constructing multicall batches. In all these cases, `@ankarachain/sdk` exports every contract ABI as a named constant so you don't have to maintain a separate ABI JSON file.

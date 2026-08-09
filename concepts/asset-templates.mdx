@@ -192,7 +192,7 @@ For unique assets — a single farm plot, a specific property title, or a single
 | Mining Rights NFT | `"mining-rights-nft"` | A unique mining licence as a single NFT |
 | Commodity Vault NFT | `"commodity-vault-nft"` | A unique warehouse vault certificate as a single NFT |
 
-NFT templates share the same metadata shapes as their fractional counterparts (e.g. `FarmlandNFTMetadata` mirrors `FarmlandMetadata`), with the addition of a `surveyReportHash` field on `FarmlandNFTMetadata`. You can also link an NFT deed to a corresponding ERC-20 fractional token using `assetLinkToERC20()`.
+NFT metadata types are related to — but not identical to — their fractional counterparts. `FarmlandNFTMetadata` replaces `valuationUSD` with a `surveyReportHash` field. `RealEstateNFTMetadata` omits `occupancyStatus`. `MiningRightsNFTMetadata` is field-for-field identical to `MiningRightsMetadata`. `CommodityVaultNFTMetadata` is warehouse-focused — it has `warehouseId`, `warehouseLocation`, `operatorAddress`, `commodityType`, `quantityKg`, `gradeClassification`, `certificateHash`, `depositDate`, and `lastUpdated` — rather than mirroring `CommodityMetadata`. You can link an NFT deed to a corresponding ERC-20 fractional token using `assetLinkToERC20()`.
 
 ---
 

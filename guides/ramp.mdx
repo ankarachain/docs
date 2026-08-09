@@ -1,5 +1,5 @@
 ---
-title: "Fiat On-Ramp and Off-Ramp with Ankara Chain"
+title: "Fiat On-Ramp and Off-Ramp Integration with Ankara Chain"
 sidebarTitle: "Fiat Ramp"
 description: "Connect your token flows to local fiat currencies (NGN, KES, GHS) using Ankara Chain's pluggable RampManager and provider interface."
 ---
@@ -53,10 +53,11 @@ const ramp = RampManager.connectAnchor(
 
 ### MoonPay
 
-To use MoonPay, pass a `RampProviderSelection` with `provider: "moonpay"` to `createRampProvider()`:
+To use MoonPay, pass a `RampProviderSelection` with `provider: "moonpay"` to `createRampProvider()`. `createRampProvider` lives in the `@ankarachain/sdk/server` entry point — it keeps Node.js-only signing code out of browser bundles. Only call this server-side or in a backend service:
 
 ```typescript
-import { createRampProvider, RampManager } from "@ankarachain/sdk";
+import { createRampProvider } from "@ankarachain/sdk/server";
+import { RampManager } from "@ankarachain/sdk";
 import type { RampProviderSelection } from "@ankarachain/sdk";
 
 const selection: RampProviderSelection = {
@@ -105,26 +106,22 @@ class YellowCardProvider implements RampProvider {
 
 ### createRampProvider()
 
-Use `createRampProvider()` for declarative provider selection from a config object — useful for reading provider settings from a database or environment variables without importing provider classes directly:
+Use `createRampProvider()` for declarative provider selection from a config object — useful for reading provider settings from environment variables without importing provider classes directly. It is exported from `@ankarachain/sdk/server` (a server-only entry point) because the `moonpay` selection links in Node.js signing code:
 
 ```typescript
-import { createRampProvider } from "@ankarachain/sdk";
+import { createRampProvider } from "@ankarachain/sdk/server";
 
+// ManualRampProvider — dev/testing, no credentials required
 const provider = createRampProvider({
   provider: "manual",
   exchangeRates: { NGN: 1 / 1500 },
   feeBps: 150,
 });
-
-// or:
-const provider = createRampProvider({
-  provider:  "stellar-anchor",
-  homeDomain: "cowrie.exchange",
-  // Note: StellarAnchorProvider needs a signer — use RampManager.connectAnchor()
-  // for Stellar anchors to wire in the signer; createRampProvider is best for
-  // "manual" and "moonpay" which don't need one at construction time.
-});
 ```
+
+<Note>
+  For Stellar anchors, use `RampManager.connectAnchor()` instead of `createRampProvider()` — the `stellar-anchor` selection requires a `StellarExternalSigner` that `connectAnchor` wires in for you.
+</Note>
 
 ---
 
@@ -133,7 +130,8 @@ const provider = createRampProvider({
 If your on-ramp and off-ramp go through different processors — for example MoonPay in, a Stellar anchor out — use `RampManager.withProviders()`:
 
 ```typescript
-import { RampManager, ManualRampProvider, createRampProvider } from "@ankarachain/sdk";
+import { createRampProvider } from "@ankarachain/sdk/server";
+import { RampManager, ManualRampProvider } from "@ankarachain/sdk";
 
 const ramp = RampManager.withProviders({
   onRamp:  createRampProvider({ provider: "moonpay", apiKey: "...", secretKey: "..." }),

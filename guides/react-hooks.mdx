@@ -1,5 +1,5 @@
 ---
-title: "React Hooks for Ankara Chain Token Data"
+title: "React Hooks for Displaying Ankara Chain Token Data"
 sidebarTitle: "React Hooks"
 description: "Use useAnkaraChain, useAsset, and useTokenBalance to display RWA token data and wallet balances in your React or Next.js application."
 ---
@@ -336,7 +336,17 @@ export default function PortfolioPage() {
 
 ## Using Stellar in the browser
 
-For Stellar, pass a `StellarAnkaraChainConfig` with `stellarSigner` instead of `stellarSecretKey`. A `stellarSigner` matches Freighter's API shape exactly, so you can pass the Freighter global object directly:
+For Stellar, pass a `StellarAnkaraChainConfig` with `stellarSigner` instead of `stellarSecretKey`. The `stellarSigner` field expects a `StellarExternalSigner` — an object with a `publicKey` string and a `signTransaction` function matching Freighter's API shape. The optional `signAuthEntry` field enables Soroban authorization when present:
+
+```typescript
+interface StellarExternalSigner {
+  publicKey:        string;
+  signTransaction:  SignTransaction;  // signs a base64-encoded XDR transaction envelope
+  signAuthEntry?:   SignAuthEntry;    // optional — enables Soroban auth entry signing
+}
+```
+
+You can pass the Freighter global object directly, since Freighter implements this shape:
 
 ```tsx
 import { useAnkaraChain } from "@ankarachain/sdk/react";

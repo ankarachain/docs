@@ -1,7 +1,7 @@
 ---
-title: "Mint and Transfer RWA Tokens to Investors"
+title: "Mint RWA Token Shares and Manage Investor Balances"
 sidebarTitle: "Mint Tokens"
-description: "Learn how to mint fractional token shares to investor addresses and manage transfers using the Ankara Chain CLI and SDK."
+description: "Learn how to mint fractional RWA token shares to investor addresses, check balances, and manage token transfers with the Ankara Chain CLI and SDK."
 ---
 
 Ankara Chain RWA tokens are ERC-20 (or Soroban SEP-41) contracts, so every token represents a fractional share of the underlying real-world asset. When you deploy a token with `TokenFactory`, the contract starts with a zero total supply and a status of `DRAFT`. Minting moves shares into investor wallets and, on first mint, transitions the token to `ACTIVE` — signalling that the asset is live and tradeable. You can also mint additional shares to an already-`ACTIVE` token, for example when a farmland holding expands or new investors are admitted.

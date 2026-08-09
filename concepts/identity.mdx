@@ -1,7 +1,7 @@
 ---
 title: "Pluggable KYC and Identity Verification in Ankara Chain"
 sidebarTitle: "Identity & KYC"
-description: "Ankara Chain's IIdentityVerifier interface lets you connect any KYC provider — Smile Identity, Persona, or custom — without modifying your core contracts."
+description: "Attach any KYC provider to Ankara Chain tokens via IIdentityVerifier — Smile Identity, Persona, or a custom contract — without redeploying your assets."
 ---
 
 Ankara Chain provides the interface and the enforcement hook — you supply the KYC provider. Every token and escrow contract in Ankara Chain supports an optional identity verifier: a separate smart contract whose sole job is to answer the question "is this address verified?" When a verifier is attached, the token contract calls it on every transfer and mint, and rejects unverified addresses automatically. You decide which KYC or identity system backs that contract.
@@ -52,13 +52,14 @@ You can also attach or change a verifier on an already-deployed token using `Ass
 ```typescript
 import { AssetRegistry } from "@ankarachain/sdk";
 
-const registry = new AssetRegistry({ network: "polygon", signer });
-
-await registry.setIdentityVerifier(
+// AssetRegistry takes the adapter, the deployed token address, and the template
+const registry = new AssetRegistry(
+  factory.adapter,
   result.tokenAddress,
-  "farmland",
-  "0xNewVerifierAddress"
+  "farmland"
 );
+
+await registry.setIdentityVerifier("0xNewVerifierAddress");
 ```
 
 ## Deploying Without a Verifier
@@ -130,10 +131,9 @@ The `WhitelistVerifier` address for your target network is available from the CL
 You can swap the verifier on any deployed token at any time using `assetSetIdentityVerifier()` through the `AssetRegistry`, or the equivalent `escrowSetIdentityVerifier()` method on deployed escrow contracts. The change takes effect immediately on the next transaction — no token migration or redeployment required.
 
 ```typescript
+// Construct an AssetRegistry for the already-deployed token
+const registry = new AssetRegistry(factory.adapter, tokenAddress, "real-estate");
+
 // Migrate from WhitelistVerifier to a production KYC verifier
-await registry.setIdentityVerifier(
-  tokenAddress,
-  "real-estate",
-  "0xProductionKYCVerifierAddress"
-);
+await registry.setIdentityVerifier("0xProductionKYCVerifierAddress");
 ```

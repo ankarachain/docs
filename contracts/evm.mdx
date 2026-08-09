@@ -1,10 +1,10 @@
 ---
-title: "EVM Smart Contracts: Solidity Contracts on Polygon and EVM Chains"
+title: "EVM Contracts: UUPS Upgradeable Solidity on Any EVM Chain"
 sidebarTitle: "EVM Contracts"
-description: "Ankara Chain's Solidity contracts use OpenZeppelin UUPS upgradeable proxies and TypeChain-generated bindings, deployable on any EVM-compatible chain."
+description: "Ankara Chain's Solidity contracts use OpenZeppelin UUPS upgradeable proxies, deployable on Polygon, Ethereum, BNB Smart Chain, Celo, and other EVM chains."
 ---
 
-The EVM contract suite lives in `packages/contracts-evm` and is built with Hardhat and OpenZeppelin Contracts v5. Every contract uses the UUPS upgradeable proxy pattern — you own the proxy addresses and the upgrade authority. TypeChain generates fully-typed ethers.js v6 bindings from the compiled artifacts, and the SDK bundles minimal ABI fragments for runtime use without requiring the full TypeChain output.
+The EVM contract suite is built with OpenZeppelin Contracts v5. Every contract uses the UUPS upgradeable proxy pattern — you own the proxy addresses and the upgrade authority. The SDK bundles minimal ABI fragments for runtime use, and full typed bindings are generated from the compiled artifacts for advanced integrations.
 
 ---
 
@@ -82,7 +82,7 @@ await proxy.upgradeToAndCall(newImplementationAddress, "0x");
 ```
 
 <Note>
-  The `TokenFactory` deploys proxies using OpenZeppelin's `ERC1967Proxy`. The optimizer is configured with `viaIR: true` and `runs: 200`. TypeChain targets `ethers-v6`.
+  The `TokenFactory` deploys proxies using OpenZeppelin's `ERC1967Proxy`. The `upgradeToAndCall` function is available on any proxy address and can be called from the owner wallet.
 </Note>
 
 ---
@@ -108,7 +108,7 @@ The owner can transfer ownership to a multisig or DAO contract at any time via O
 Clone the repository and install dependencies, then use these commands from the repo root or from `packages/contracts-evm`:
 
 ```bash
-# Compile all Solidity contracts (generates TypeChain bindings)
+# Compile all Solidity contracts
 npm run compile
 
 # Run the full Hardhat test suite

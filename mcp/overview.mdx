@@ -1,7 +1,7 @@
 ---
 title: "Ankara Chain MCP Server: AI-Assisted Token Deployment"
 sidebarTitle: "MCP Server"
-description: "The Ankara Chain MCP server lets Claude and other AI assistants deploy RWA tokens, manage escrow, and query on-chain state via natural language instructions."
+description: "Connect Claude or any MCP-compatible AI to Ankara Chain. Deploy RWA tokens, manage escrow, and query on-chain state using natural language instructions."
 ---
 
 The Model Context Protocol (MCP) is an open standard that lets AI assistants like Claude call external tools in a structured, type-safe way. The `@ankarachain/mcp` package implements an MCP server that exposes the entire Ankara Chain SDK — token deployment, escrow management, fiat ramp flows, and on-chain queries — as a set of callable tools. Once connected, you describe what you want in plain language and Claude handles the transaction construction, signing, and submission for you.
@@ -44,7 +44,7 @@ Restart Claude Desktop after saving. You will see **ankara-chain** listed under 
 
 ## Available Tools
 
-The MCP server exposes 24 tools, organised below by function. Every tool that submits a transaction requires `rpcUrl` and `privateKey` fields. Read-only tools require only `rpcUrl`.
+The MCP server exposes 24 tools, organised below by function. Tools that submit on-chain transactions require `rpcUrl` and `privateKey` fields. Read-only chain queries require only `rpcUrl`. Ramp provider tools (`get_ramp_quote`, `initiate_onramp`) interact with the off-chain ramp provider only and require neither field.
 
 ---
 

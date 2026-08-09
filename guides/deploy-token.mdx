@@ -1,7 +1,7 @@
 ---
-title: "Deploy an RWA Token with Ankara Chain SDK"
+title: "Deploy Tokenized Real-World Assets with Ankara Chain"
 sidebarTitle: "Deploy Token"
-description: "Step-by-step guide to deploying a tokenized real-world asset using TokenFactory — from project setup through a live ERC-20 or Soroban token on-chain."
+description: "Step-by-step guide to deploying a tokenized real-world asset using TokenFactory — from setup to a live ERC-20 or Soroban token on-chain."
 ---
 
 Ankara Chain's `TokenFactory` class is the single entry point for deploying tokenized real-world assets on either an EVM chain or Stellar. You provide a config object — network, signer, and factory contract address — and call one of the template-specific deploy methods. The factory handles encoding your asset metadata and broadcasting the deployment transaction, returning a `DeployResult` with the new token address as soon as the transaction is confirmed.
