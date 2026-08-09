@@ -1,0 +1,160 @@
+---
+title: "Contract ABIs Exported from @ankarachain/sdk"
+sidebarTitle: "ABIs"
+description: "@ankarachain/sdk exports TypeChain-generated ABIs for all Ankara Chain contracts, ready to use with ethers.js v6 for direct contract interaction."
+---
+
+For most workflows you will never touch an ABI directly — the SDK's high-level classes (`TokenFactory`, `AssetRegistry`, `EscrowManager`, etc.) handle contract interaction on your behalf. However, there are scenarios where you need raw ABI access: building a custom UI that reads contract state directly, integrating with a wallet library that expects ABI fragments, writing scripts that call contract functions not yet surfaced by the SDK, or constructing multicall batches. In all these cases, `@ankarachain/sdk` exports every contract ABI as a named constant so you don't have to maintain a separate ABI JSON file.
+
+```typescript
+import {
+  FARMLAND_TOKEN_ABI,
+  ESCROW_FACTORY_ABI,
+  MILESTONE_ESCROW_ABI,
+} from "@ankarachain/sdk";
+```
+
+All ABIs are typed `as const` — TypeScript can infer the exact function and event shapes.
+
+---
+
+## ERC-20 Token ABIs
+
+<CardGroup cols={2}>
+  <Card title="TOKEN_FACTORY_ABI" icon="factory">
+    The main ERC-20 token factory. Exposes `deployFarmlandToken`, `deployCommodityReceiptToken`, `deployRealEstateToken`, `deployInvoiceToken`, `deployCarbonCreditToken`, `deployMiningRightsToken`, `registerTemplate`, `totalDeployed`, `getDeployerTokens`, `deploymentFee`, `implementations`, and the `TokenDeployed` event.
+  </Card>
+  <Card title="FARMLAND_TOKEN_ABI" icon="wheat">
+    FarmlandToken proxy surface: standard ERC-20 (`name`, `symbol`, `totalSupply`, `balanceOf`, `transfer`, `approve`, `allowance`), plus `mint`, `burn`, `pause/unpause`, `assetId`, `countryCode`, `status`, `getMetadata`, `valuationUSD`, `areaSqMeters`, `updateValuation`, `updateTitleDocument`, `setStatus`, `setIdentityVerifier`, and the `MetadataUpdated` / `AssetStatusChanged` events.
+  </Card>
+  <Card title="COMMODITY_TOKEN_ABI" icon="box">
+    CommodityReceiptToken surface: ERC-20 base plus `commodityType`, `quantityKg`, `valuationUSD`, `isExpired`, `markExpired`, `getMetadata`, and `MetadataUpdated`.
+  </Card>
+  <Card title="REAL_ESTATE_TOKEN_ABI" icon="building">
+    RealEstateToken surface: ERC-20 base plus `valuationUSD`, `rentalYieldBps`, `occupancyStatus`, `totalRentalDistributed`, `updateValuation`, `updateOccupancyStatus`, `declareRentalDistribution`, and `RentalDeclared`.
+  </Card>
+  <Card title="INVOICE_TOKEN_ABI" icon="file-invoice">
+    InvoiceToken surface: ERC-20 base plus `invoiceStatus`, `faceValueUSD`, `isOverdue`, `daysUntilDue`, `markFunded`, `markRepaid`, `markDefaulted`, and `InvoiceStatusChanged`.
+  </Card>
+  <Card title="CARBON_CREDIT_TOKEN_ABI" icon="leaf">
+    CarbonCreditToken surface: ERC-20 base plus `creditType`, `vintageYear`, `quantityCO2e`, `totalRetired`, `totalRetirements`, `retire`, and `CreditsRetired`.
+  </Card>
+  <Card title="MINING_RIGHTS_TOKEN_ABI" icon="pickaxe">
+    MiningRightsToken surface: ERC-20 base plus `mineralType`, `royaltyRateBps`, `areaHectares`, `isLicenseExpired`, `daysUntilExpiry`, `totalRoyaltiesDeclared`, `renewLicense`, `markLicenseExpired`, `declareRoyalty`, and `RoyaltyDeclared`.
+  </Card>
+  <Card title="ERC20_METADATA_ABI" icon="tag">
+    Minimal read-only ABI for any ERC-20: `name()`, `symbol()`, `decimals()`. Useful for reading details on arbitrary token contracts, since the template ABIs above do not expose `decimals()`.
+  </Card>
+</CardGroup>
+
+### `WHITELIST_VERIFIER_ABI`
+
+The optional identity verification contract. Exposes `isVerified`, `verifyIdentity`, `revokeIdentity`, `batchVerify`, `verifierName`, and the `IdentityVerified` / `IdentityRevoked` events.
+
+---
+
+## NFT ABIs
+
+<CardGroup cols={2}>
+  <Card title="NFT_FACTORY_ABI" icon="factory">
+    NFT factory. Exposes `deployFarmlandNFT`, `deployRealEstateNFT`, `deployMiningRightsNFT`, `deployCommodityVaultNFT`, `registerTemplate`, `totalDeployedNFTs`, `getDeployerNFTs`, `deploymentFee`, `implementations`, and `NFTDeployed`.
+  </Card>
+  <Card title="FARMLAND_NFT_ABI" icon="map">
+    ERC-721 FarmlandNFT: standard NFT surface plus `mint`, `burn`, `getMetadata`, `updateMetadata`, `updateTitleDocument`, `metadataVersion`, `assetId`, `countryCode`, `status`, `identityVerifier`, `linkedERC20`, `setStatus`, `setIdentityVerifier`, `linkToERC20`, `pause/unpause`, and `FarmlandNFTMinted` / `MetadataUpdated` / `ERC20Linked`.
+  </Card>
+  <Card title="REAL_ESTATE_NFT_ABI" icon="building-2">
+    ERC-721 RealEstateNFT: NFT surface plus `mint`, `burn`, `getMetadata`, `updateMetadata`, `updateValuation`, `metadataVersion`, `linkedERC20`, `linkToERC20`, and `ValuationUpdated`.
+  </Card>
+  <Card title="MINING_RIGHTS_NFT_ABI" icon="gem">
+    ERC-721 MiningRightsNFT: NFT surface plus `mint`, `burn`, `getMetadata`, `updateMetadata`, `renewLicense`, `isLicenseExpired`, and `LicenseRenewed`.
+  </Card>
+  <Card title="COMMODITY_VAULT_NFT_ABI" icon="warehouse">
+    ERC-721 CommodityVaultNFT: NFT surface plus `mint`, `burn`, `getMetadata`, `updateMetadata`, `metadataVersion`, `linkedERC20`, `linkToERC20`, and `CommodityVaultNFTMinted`.
+  </Card>
+</CardGroup>
+
+---
+
+## Multi-Token ABIs
+
+<CardGroup cols={2}>
+  <Card title="MULTI_TOKEN_FACTORY_ABI" icon="factory">
+    ERC-1155 factory. Exposes `deployCommodityBatchToken`, `deployPoolVault`, `registerTemplate`, `totalDeployedMultiTokens`, `getDeployerMultiTokens`, `deploymentFee`, and `MultiTokenDeployed`.
+  </Card>
+  <Card title="COMMODITY_BATCH_TOKEN_ABI" icon="boxes">
+    ERC-1155 commodity batch contract. Exposes `registerBatch`, `mint`, `balanceOf`, `getBatchMetadata`, `getWarehouseMetadata`, `activeBatchCount`, `batchIds`, `isExpired`, `expireBatch`, and `BatchRegistered`.
+  </Card>
+  <Card title="POOL_VAULT_ABI" icon="vault">
+    ERC-20 pool vault. Exposes `deposit`, `withdraw`, `accrueManagementFee`, `NAVPerToken`, `totalAUM`, `acceptedTokens`, `addAcceptedToken`, `removeAcceptedToken`, `setOracle`, `setManagementFeeBps`, `isAccepted`, and `Deposited` / `Withdrawn` / `FeeAccrued`.
+  </Card>
+  <Card title="MANUAL_ORACLE_ABI" icon="chart-line">
+    Admin-controlled price oracle. Exposes `getPrice`, `isStale`, `setPrice`, `setStalenessThreshold`, `stalenessThreshold`, and `PriceSet`.
+  </Card>
+</CardGroup>
+
+---
+
+## Escrow ABIs
+
+### `ESCROW_FACTORY_ABI`
+
+Deploys `MilestoneEscrow` contracts. Exposes `deployEscrow`, `setImplementation`, `setStablecoinAccepted`, `acceptedStablecoins`, `implementation`, `totalDeployedEscrows`, `getDeployerEscrows`, `deploymentFee`, and `EscrowDeployed`.
+
+### `MILESTONE_ESCROW_ABI`
+
+The per-deal escrow contract. Exposes the full milestone lifecycle:
+
+| Function | Description |
+|---|---|
+| `fund(milestoneId)` | Payer funds a specific milestone tranche |
+| `markDelivered(milestoneId)` | Payee marks a milestone as delivered |
+| `approveMilestone(milestoneId)` | Payer releases funds to payee |
+| `raiseDispute(milestoneId)` | Payer opens a dispute |
+| `resolveDispute(milestoneId, releaseToPayee)` | Arbiter resolves the dispute |
+| `claimTimelockRelease(milestoneId)` | Payee claims after timelock expires |
+| `voteCancel()` | Either party votes to cancel the deal |
+| `setArbiter(newArbiter)` | Admin reassigns the arbiter |
+| `getMilestone(milestoneId)` | Read milestone struct |
+| `remainingBalance()` | Unallocated balance in the contract |
+
+---
+
+## Ramp Settlement ABIs
+
+### `RAMP_SETTLEMENT_FACTORY_ABI`
+
+Factory for on-chain ramp settlement contracts. Exposes `deployRampSettlement`, `setImplementation`, `implementation`, `totalDeployedRampSettlements`, `getDeployerRampSettlements`, `deploymentFee`, and `RampSettlementDeployed`.
+
+### `RAMP_SETTLEMENT_ABI`
+
+Per-deployment ramp settlement contract. Exposes `treasury`, `initiateOffRamp`, `confirmOffRampSettlement`, `refundOffRamp`, `recordOnRampSettlement`, `getOffRamp`, `getOnRamp`, `setTreasury`, `pause/unpause`, and all four settlement events.
+
+---
+
+## Usage example
+
+```typescript
+import { Contract, JsonRpcProvider } from "ethers";
+import { FARMLAND_TOKEN_ABI, getNetwork } from "@ankarachain/sdk";
+
+const network = getNetwork("polygon");
+const provider = new JsonRpcProvider(network.rpcUrl);
+
+const token = new Contract(
+  "0xYourDeployedFarmlandTokenAddress",
+  FARMLAND_TOKEN_ABI,
+  provider,
+);
+
+const metadata = await token.getMetadata();
+console.log(metadata.location);     // e.g. "Kaduna, Nigeria"
+console.log(metadata.areaSqMeters); // bigint
+console.log(metadata.valuationUSD); // bigint (in wei)
+
+const status = await token.status();
+console.log(status); // 0 = DRAFT, 1 = ACTIVE, etc.
+```
+
+<Note>
+  For most use cases, use the high-level SDK classes instead of raw ABIs. `AssetRegistry` wraps `getMetadata()` and `setStatus()` with a clean TypeScript API. Direct ABI usage is recommended only for advanced integrations or when calling contract functions that are not yet surfaced by the SDK classes.
+</Note>

@@ -1,0 +1,100 @@
+---
+title: "Ankara Chain: Open-Source RWA Tokenization Infrastructure"
+sidebarTitle: "Introduction"
+description: "Ankara Chain lets you tokenize real-world assets on EVM chains and Stellar with pre-audited contracts and a TypeScript SDK — no Solidity required."
+---
+
+**Ankara Chain** is open-source infrastructure for tokenizing real-world assets (RWAs) on-chain. Think of it as the Stripe for RWA tokenization in Africa — plug it into your existing Node.js or React app the same way you'd plug in a payments library, deploy pre-audited contracts under your own keys, and keep full control of your business logic. Whether you're building a fractional farmland platform in Nigeria, a commodity receipt market in Ghana, or a diaspora investment product connecting Nairobi to London, Ankara Chain gives you the contract infrastructure so you can focus on your product.
+
+<CardGroup cols={2}>
+  <Card title="EVM Quickstart" icon="rocket" href="/quickstart">
+    Deploy your first token on Polygon Amoy testnet in under 30 minutes — no Solidity required.
+  </Card>
+  <Card title="Stellar Quickstart" icon="star" href="/quickstart-stellar">
+    Deploy on Stellar Soroban testnet using the same SDK API as EVM chains.
+  </Card>
+  <Card title="Asset Templates" icon="layer-group" href="/concepts/asset-templates">
+    Six pre-audited asset classes: farmland, commodity, real estate, invoice, carbon credit, mining rights.
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/commands">
+    The `ankara` CLI scaffolds projects, deploys contracts, and mints tokens from your terminal.
+  </Card>
+</CardGroup>
+
+---
+
+## Architecture
+
+Ankara Chain sits between raw blockchain protocols and your product. You own the business layer — Ankara Chain provides the contract infrastructure and the TypeScript SDK that wraps it.
+
+```
+┌─────────────────────────────────────────┐
+│  End Users & Investors                  │  ← Farmers, businesses, diaspora
+├─────────────────────────────────────────┤
+│  Your Application                       │  ← Business logic, UX, compliance decisions
+├─────────────────────────────────────────┤
+│  Ankara Chain SDK          ← You are here│  ← Smart contracts, CLI, TypeScript API
+├─────────────────────────────────────────┤
+│  Blockchain Protocol                    │  ← Ethereum · Polygon · Stellar · Celo · BNB
+└─────────────────────────────────────────┘
+```
+
+The contracts deploy to your chosen network under **your deployer key** — Ankara Chain never holds custody of your assets or your infrastructure. The SDK's `TokenFactory` class is the primary entry point: it accepts an ethers.js `Signer` (EVM) or a Stellar secret key / Freighter wallet (Stellar), and exposes a unified `deployFarmland()`, `deployCommodity()`, `deployRealEstate()`, and similar methods regardless of which chain you target.
+
+---
+
+## Why Ankara Chain?
+
+<AccordionGroup>
+  <Accordion title="Plug in, not lock in">
+    Import `@ankarachain/sdk` into your existing Node.js or React app. There is no platform dependency, no managed service, and no vendor dashboard you must use. The contracts are yours — deployed to your chosen network under your deployer key. You can eject from the SDK entirely and interact with the deployed contracts directly via ethers.js or the Stellar SDK if you ever need to.
+  </Accordion>
+
+  <Accordion title="Built for African context">
+    Asset schemas are designed around the realities of African markets: farmland parcels with GPS coordinates and soil classifications, commodity receipts tied to specific warehouses and inspection reports, mining rights linked to license numbers and concession areas. Identity hooks support BVN, NIN, Huduma Namba, and Ghana Card natively — not retrofitted from European KYC standards. Supported countries include Nigeria, Ghana, Kenya, and South Africa.
+  </Accordion>
+
+  <Accordion title="Compliance hooks, not compliance">
+    Ankara Chain provides the `IIdentityVerifier` interface and plugs it into the transfer layer of every deployed token. You decide which KYC provider backs it — Smile Identity, Persona, your own internal verification service, or nothing at all for permissionless deployments. Swapping your KYC provider never requires redeploying core contracts, because the verifier address is a configurable parameter, not compiled into the token logic.
+  </Accordion>
+
+  <Accordion title="Open core, full self-custody">
+    The smart contracts and TypeScript SDK are MIT licensed. There is no proprietary runtime between your app and the chain. The optional dashboard is self-hosted, so you control infrastructure and keys end-to-end. The open-core model means you get the benefits of a maintained, audited library without any of the lock-in of a SaaS tokenization platform.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## SDK Modules
+
+Every module ships as part of the `@ankarachain/sdk` package and is MIT licensed unless noted.
+
+| Module | Description |
+|--------|-------------|
+| **Token Factory** | Deploy RWA tokens from pre-audited ERC-20 templates. The `TokenFactory` class is your primary entry point — it handles provider setup, contract deployment, and result normalization across both EVM and Stellar adapters. |
+| **Asset Registry** | On-chain metadata schema and lifecycle management. Tracks each asset through `DRAFT → ACTIVE → SUSPENDED → REDEEMED/EXPIRED` states with the `AssetRegistry` class. |
+| **Transfer Engine** | Permissioned transfers, time-locks, and milestone-based escrow. The `MilestoneEscrow` contract lets you structure tranche payments tied to on-chain delivery confirmations. |
+| **Identity Hooks** | Pluggable KYC interface (`IIdentityVerifier`). Pass an `identityVerifier` address at deploy time to gate transfers behind your chosen verification provider without touching contract code. |
+| **Multi-Chain Adapter** | Unified EVM + Stellar API. The same `TokenFactory` method signatures work on Polygon, Celo, BNB Chain, and Stellar Soroban — the adapter layer handles the protocol differences. |
+
+---
+
+## Supported Chains
+
+| Chain | Network Type | Notes |
+|-------|-------------|-------|
+| **Ethereum** | EVM | Mainnet; highest liquidity for large institutional issuances |
+| **Polygon** | EVM | Low fees; recommended starting point for most African market deployments |
+| **BNB Chain** | EVM | Mainnet; strong retail penetration across West Africa |
+| **Celo** | EVM | Mobile-first; stablecoin-native (cUSD, cEUR); optimized for low-data environments |
+| **Stellar** | Soroban | Soroban smart contracts; stablecoin rails via USDC/EURC anchors; full SDK feature parity with EVM chains |
+
+<Note>
+  Testnet support is available for Polygon Amoy and Stellar Testnet. Use these for development and staging before deploying to mainnet. The CLI defaults to `polygon-amoy` when you run `ankara init`.
+</Note>
+
+---
+
+## License
+
+Core SDK and smart contracts are [MIT licensed](https://github.com/ankarachain/ankara-core/blob/main/LICENSE). Built by [PIE Drops Studio](https://piedrops.com).

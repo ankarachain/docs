@@ -1,0 +1,658 @@
+---
+title: "TokenFactory: Deploy RWA Tokens from Pre-Audited Templates"
+sidebarTitle: "TokenFactory"
+description: "The TokenFactory class is the main entry point for deploying RWA tokens. It wraps the on-chain factory contract with a type-safe TypeScript API."
+---
+
+`TokenFactory` is the primary entry point for deploying Ankara Chain RWA tokens onto EVM chains (Polygon, Ethereum, BNB Chain, Celo) and Stellar Soroban. It wraps the on-chain factory contract in a developer-friendly, fully typed API that selects the correct adapter — `EVMAdapter` or `StellarAdapter` — based on the `network` field you pass to the constructor.
+
+## Import
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+import { ethers } from "ethers"; // EVM only
+```
+
+---
+
+## Constructor
+
+```typescript
+new TokenFactory(config: AnkaraChainConfig)
+```
+
+The constructor accepts a discriminated-union config. Set `network` to an EVM network name and TypeScript narrows the type to `EVMAnkaraChainConfig`; set it to `"stellar"` or `"stellar-testnet"` and it narrows to `StellarAnkaraChainConfig`.
+
+### `EVMAnkaraChainConfig`
+
+<ParamField path="network" type='"polygon" | "polygon-amoy" | "ethereum" | "bnb" | "celo" | "localhost"' required>
+  The EVM network to target. Selects the correct default RPC URL, chain ID, and factory contract addresses.
+</ParamField>
+
+<ParamField path="signer" type="ethers.Signer">
+  An `ethers` `Signer` used to sign deployment transactions. Required for any write operation; omit if you're only reading.
+</ParamField>
+
+<ParamField path="provider" type="ethers.Provider">
+  An `ethers` `Provider`. If omitted, a `JsonRpcProvider` is constructed from `rpcUrl` (or the network default).
+</ParamField>
+
+<ParamField path="factoryAddress" type="string">
+  Override the default ERC-20 `TokenFactory` contract address.
+</ParamField>
+
+<ParamField path="nftFactoryAddress" type="string">
+  Override the default NFT factory contract address.
+</ParamField>
+
+<ParamField path="escrowFactoryAddress" type="string">
+  Override the default `EscrowFactory` contract address.
+</ParamField>
+
+<ParamField path="multiTokenFactoryAddress" type="string">
+  Override the default ERC-1155 `MultiTokenFactory` contract address.
+</ParamField>
+
+<ParamField path="rampSettlementFactoryAddress" type="string">
+  Override the default `RampSettlementFactory` contract address.
+</ParamField>
+
+<ParamField path="rpcUrl" type="string">
+  Override the default RPC endpoint for the selected network.
+</ParamField>
+
+### `StellarAnkaraChainConfig`
+
+<ParamField path="network" type='"stellar" | "stellar-testnet"' required>
+  Targets the Stellar Soroban mainnet or the public testnet.
+</ParamField>
+
+<ParamField path="stellarSecretKey" type="string">
+  A Stellar secret seed (starts with `"S..."`). **Server-side and CLI use only** — never pass a raw secret key in a browser. Use `stellarSigner` instead for browser contexts.
+</ParamField>
+
+<ParamField path="stellarSigner" type="StellarExternalSigner">
+  An external wallet signer such as Freighter. Mutually exclusive with `stellarSecretKey`; if both are provided, `stellarSecretKey` takes precedence.
+</ParamField>
+
+<ParamField path="factoryAddress" type="string">
+  Soroban contract ID (starts with `"C..."`) for the token factory. Override only if you deploy your own factory instance.
+</ParamField>
+
+<Warning>
+  **Never use `stellarSecretKey` in a browser.** The raw Stellar secret seed gives full control of the account. In any browser or mobile context, use `stellarSigner` with a SEP-43-compatible wallet like Freighter — the secret seed never needs to leave the wallet extension.
+</Warning>
+
+### EVM example
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+import { ethers } from "ethers";
+
+const provider = new ethers.JsonRpcProvider("https://rpc-amoy.polygon.technology");
+const signer   = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+
+const factory = new TokenFactory({
+  network: "polygon-amoy",
+  signer,
+});
+```
+
+### Stellar example (server-side)
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+
+const factory = new TokenFactory({
+  network: "stellar-testnet",
+  stellarSecretKey: process.env.STELLAR_SECRET!, // server-side only
+});
+```
+
+### Stellar example (browser / Freighter)
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+import freighter from "@stellar/freighter-api";
+
+const factory = new TokenFactory({
+  network: "stellar-testnet",
+  stellarSigner: {
+    publicKey: await freighter.getPublicKey(),
+    signTransaction: freighter.signTransaction,
+  },
+});
+```
+
+---
+
+## Fungible Token Methods
+
+### `deployFarmland`
+
+```typescript
+deployFarmland(opts: DeployFarmlandOptions): Promise<DeployResult>
+```
+
+Deploys a new `FarmlandToken` ERC-20 (EVM) or SEP-41 (Stellar) via the on-chain factory. The token represents fractional ownership of agricultural land.
+
+<ParamField path="name" type="string" required>
+  Human-readable token name, e.g. `"Kano Farmland Token"`.
+</ParamField>
+
+<ParamField path="symbol" type="string" required>
+  Ticker symbol, e.g. `"KFT"`.
+</ParamField>
+
+<ParamField path="assetId" type="string" required>
+  Your off-chain asset identifier, e.g. `"KANO-FARM-001"`. Stored on-chain for indexing.
+</ParamField>
+
+<ParamField path="countryCode" type="string" required>
+  ISO 3166-1 alpha-2 country code, e.g. `"NG"` for Nigeria.
+</ParamField>
+
+<ParamField path="metadata" type="FarmlandMetadata" required>
+  Template-specific metadata struct (see below).
+</ParamField>
+
+<ParamField path="admin" type="string">
+  Address granted `DEFAULT_ADMIN_ROLE`. Defaults to the connected signer.
+</ParamField>
+
+<ParamField path="identityVerifier" type="string">
+  Address of an on-chain identity verifier for KYC-gated transfers. Pass the zero address (or omit) to allow unrestricted transfers.
+</ParamField>
+
+**`FarmlandMetadata` fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `location` | `string` | Human-readable location description |
+| `areaSqMeters` | `bigint` | Plot area in square metres |
+| `soilType` | `string` | e.g. `"Sandy loam"` |
+| `irrigationType` | `string` | e.g. `"Drip"`, `"Rain-fed"` |
+| `cropHistory` | `string` | Free-form crop history note |
+| `titleDocumentHash` | `string` | `bytes32` hex hash of the title deed |
+| `valuationUSD` | `bigint` | USD valuation in wei (1e18 = $1) |
+| `stateRegion` | `string` | State or regional subdivision |
+| `lastUpdated` | `bigint` | Unix timestamp of last metadata update |
+
+**Returns:** `Promise<DeployResult>`
+
+<ResponseField name="tokenAddress" type="string">
+  The address of the newly deployed token contract.
+</ResponseField>
+
+<ResponseField name="txHash" type="string">
+  Transaction hash of the deployment transaction.
+</ResponseField>
+
+<ResponseField name="assetId" type="string">
+  Echo of the `assetId` you supplied.
+</ResponseField>
+
+<ResponseField name="template" type="AssetTemplate">
+  Always `"farmland"` for this method.
+</ResponseField>
+
+<ResponseField name="network" type="SupportedNetwork">
+  The network the token was deployed on.
+</ResponseField>
+
+<ResponseField name="deployedAt" type="number">
+  Unix timestamp of the deployment.
+</ResponseField>
+
+**Full example:**
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+import { ethers } from "ethers";
+
+const factory = new TokenFactory({ network: "polygon-amoy", signer });
+
+const result = await factory.deployFarmland({
+  name:        "Kano Farmland Token",
+  symbol:      "KFT",
+  assetId:     "KANO-FARM-001",
+  countryCode: "NG",
+  metadata: {
+    location:          "Kano State, Nigeria — Plot 14B, Dawanau",
+    areaSqMeters:      250_000n,
+    soilType:          "Sandy loam",
+    irrigationType:    "Drip",
+    cropHistory:       "Sesame (2022), Soybean (2023), Sorghum (2024)",
+    titleDocumentHash: "0xabc123...def456",  // bytes32 hex
+    valuationUSD:      150_000n * 10n ** 18n, // $150,000 in wei
+    stateRegion:       "Kano",
+    lastUpdated:       BigInt(Math.floor(Date.now() / 1000)),
+  },
+});
+
+console.log("Token deployed at:", result.tokenAddress);
+console.log("Transaction hash:", result.txHash);
+```
+
+---
+
+### `deployCommodity`
+
+```typescript
+deployCommodity(opts: DeployCommodityOptions): Promise<DeployResult>
+```
+
+Deploys a `CommodityReceiptToken` representing warehouse-receipted physical commodities (grain, cocoa, coffee, etc.).
+
+<ParamField path="metadata" type="CommodityMetadata" required>
+  Warehouse receipt metadata including commodity type, quantity, warehouse ID, and inspection report hash.
+</ParamField>
+
+**`CommodityMetadata` key fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `commodityType` | `string` | e.g. `"Cocoa"`, `"Sesame"` |
+| `quantityKg` | `bigint` | Quantity in kilograms |
+| `gradeClassification` | `string` | e.g. `"Grade A"` |
+| `warehouseId` | `string` | Warehouse operator identifier |
+| `depositDate` | `bigint` | Unix timestamp of deposit |
+| `expiryDate` | `bigint` | Unix timestamp of commodity expiry |
+| `inspectionReportHash` | `string` | `bytes32` hash of the inspection certificate |
+| `valuationUSD` | `bigint` | USD valuation in wei |
+
+```typescript
+const result = await factory.deployCommodity({
+  name:        "Lagos Cocoa Receipt",
+  symbol:      "LCR",
+  assetId:     "LAGOS-COCOA-2024-001",
+  countryCode: "NG",
+  metadata: {
+    commodityType:        "Cocoa",
+    quantityKg:           50_000n,
+    gradeClassification:  "Grade A",
+    warehouseId:          "WH-APAPA-003",
+    warehouseLocation:    "Apapa, Lagos",
+    depositDate:          BigInt(Math.floor(Date.now() / 1000)),
+    expiryDate:           BigInt(Math.floor(Date.now() / 1000) + 60 * 24 * 60 * 60),
+    inspectionReportHash: "0xdeadbeef...",
+    valuationUSD:         75_000n * 10n ** 18n,
+    harvestSeason:        "2024A",
+    lastUpdated:          BigInt(Math.floor(Date.now() / 1000)),
+  },
+});
+```
+
+---
+
+### `deployRealEstate`
+
+```typescript
+deployRealEstate(opts: DeployRealEstateOptions): Promise<DeployResult>
+```
+
+Deploys a `RealEstateToken` for fractional property ownership. Supports residential, commercial, industrial, and land asset types.
+
+**`RealEstateMetadata` key fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `propertyType` | `string` | `"Residential"` \| `"Commercial"` \| `"Industrial"` \| `"Land"` |
+| `totalAreaSqMeters` | `bigint` | Total floor/land area |
+| `valuationUSD` | `bigint` | USD valuation in wei |
+| `rentalYieldBps` | `bigint` | Annual yield in basis points (e.g. `600n` = 6%) |
+| `occupancyStatus` | `string` | `"Vacant"` \| `"Owner-occupied"` \| `"Tenanted"` |
+| `developerAddress` | `string` | On-chain address of the developer/issuer |
+
+---
+
+### `deployInvoice`
+
+```typescript
+deployInvoice(opts: DeployInvoiceOptions): Promise<DeployResult>
+```
+
+Deploys an `InvoiceToken` for invoice financing / trade receivables. The token tracks an invoice lifecycle from `PENDING` → `FUNDED` → `REPAID` / `DEFAULTED`.
+
+**`InvoiceMetadata` key fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `faceValueUSD` | `bigint` | Invoice face value in wei |
+| `discountRateBps` | `bigint` | Discount rate in basis points |
+| `dueDate` | `bigint` | Unix timestamp of invoice due date |
+| `currency` | `string` | ISO 4217 code, e.g. `"NGN"`, `"KES"` |
+| `invoiceDocumentHash` | `string` | `bytes32` hash of the invoice document |
+
+---
+
+### `deployCarbonCredit`
+
+```typescript
+deployCarbonCredit(opts: DeployCarbonCreditOptions): Promise<DeployResult>
+```
+
+Deploys a `CarbonCreditToken` representing verified emissions reductions. Supports retirement events tracked entirely on-chain.
+
+**`CarbonCreditMetadata` key fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `creditType` | `string` | `"REDD+"` \| `"VCS"` \| `"Gold Standard"` \| `"CDM"` |
+| `vintageYear` | `bigint` | Year the credit was generated |
+| `quantityCO2e` | `bigint` | Tonnes CO₂-equivalent in wei (1e18 = 1 tCO₂e) |
+| `projectType` | `string` | `"Forestry"` \| `"Agriculture"` \| `"Energy"` \| `"Waste"` |
+| `verificationDocHash` | `string` | `bytes32` hash of the verification certificate |
+
+---
+
+### `deployMiningRights`
+
+```typescript
+deployMiningRights(opts: DeployMiningRightsOptions): Promise<DeployResult>
+```
+
+Deploys a `MiningRightsToken` representing fractional mining licence ownership. Tracks licence expiry and royalty declarations on-chain.
+
+**`MiningRightsMetadata` key fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `mineralType` | `string` | `"Gold"` \| `"Coltan"` \| `"Copper"` \| `"Diamond"` \| `"Coal"` \| `"Lithium"` |
+| `licenseExpiry` | `bigint` | Unix timestamp of licence expiry |
+| `royaltyRateBps` | `bigint` | Royalty rate in basis points |
+| `issuingAuthority` | `string` | e.g. `"Ministry of Mines, DRC"` |
+| `licenseDocumentHash` | `string` | `bytes32` hash of the licence document |
+
+---
+
+## NFT Methods
+
+Each NFT method deploys a non-fungible (ERC-721 / Soroban NFT) version of the asset, where individual tokens can represent distinct parcels or units.
+
+### `deployFarmlandNFT`
+
+```typescript
+deployFarmlandNFT(opts: DeployFarmlandNFTOptions): Promise<NFTDeployResult>
+```
+
+### `deployRealEstateNFT`
+
+```typescript
+deployRealEstateNFT(opts: DeployRealEstateNFTOptions): Promise<NFTDeployResult>
+```
+
+### `deployMiningRightsNFT`
+
+```typescript
+deployMiningRightsNFT(opts: DeployMiningRightsNFTOptions): Promise<NFTDeployResult>
+```
+
+### `deployCommodityVaultNFT`
+
+```typescript
+deployCommodityVaultNFT(opts: DeployCommodityVaultNFTOptions): Promise<NFTDeployResult>
+```
+
+All NFT deploy options extend `BaseDeployNFTOptions` (same `name`, `symbol`, `assetId`, `countryCode`, `admin`, `identityVerifier` fields as fungible tokens) plus a template-specific `metadata` struct.
+
+**`NFTDeployResult` fields:**
+
+<ResponseField name="nftAddress" type="string">
+  Address of the deployed NFT contract.
+</ResponseField>
+
+<ResponseField name="txHash" type="string">
+  Deployment transaction hash.
+</ResponseField>
+
+<ResponseField name="template" type="NFTAssetTemplate">
+  One of `"farmland-nft"`, `"real-estate-nft"`, `"mining-rights-nft"`, `"commodity-vault-nft"`.
+</ResponseField>
+
+You can query all NFT contracts deployed by a wallet:
+
+```typescript
+const nfts  = await factory.getDeployedNFTs();       // defaults to connected signer
+const count = await factory.totalDeployedNFTs();
+```
+
+---
+
+## Multi-Token Methods
+
+### `deployCommodityBatchToken`
+
+```typescript
+deployCommodityBatchToken(opts: DeployCommodityBatchOptions): Promise<MultiTokenDeployResult>
+```
+
+Deploys a `CommodityBatchToken` (ERC-1155 on EVM) — a multi-batch warehouse receipt where each token ID represents a distinct commodity lot in the same warehouse.
+
+<ParamField path="name" type="string" required>
+  Contract-level name for the collection.
+</ParamField>
+
+<ParamField path="countryCode" type="string" required>
+  ISO 3166-1 alpha-2 country code.
+</ParamField>
+
+<ParamField path="baseURI" type="string" required>
+  Base URI for per-token metadata (e.g. an IPFS gateway URL).
+</ParamField>
+
+<ParamField path="warehouse" type="WarehouseMetadata" required>
+  Warehouse operator details including `warehouseId`, `warehouseLocation`, `operatorAddress`, `warehouseLicenseHash`, and `certificationExpiry`.
+</ParamField>
+
+---
+
+### `deployPoolVault`
+
+```typescript
+deployPoolVault(opts: DeployPoolVaultOptions): Promise<MultiTokenDeployResult>
+```
+
+Deploys a `PoolVault` — a multi-asset ERC-20 fund that holds a basket of Ankara RWA tokens and issues proportional LP shares.
+
+<ParamField path="oracle" type="string">
+  Address of an on-chain price oracle. Defaults to `address(0)` (no oracle — NAV calculations are manual until one is set).
+</ParamField>
+
+<ParamField path="managementFeeBps" type="number">
+  Annual management fee in basis points. Defaults to `0`.
+</ParamField>
+
+**`MultiTokenDeployResult` fields:**
+
+<ResponseField name="contractAddress" type="string">
+  Address of the deployed multi-token contract.
+</ResponseField>
+
+<ResponseField name="template" type="MultiTokenTemplate">
+  Either `"commodity-batch"` or `"pool-vault"`.
+</ResponseField>
+
+---
+
+## Escrow Methods
+
+### `deployEscrow`
+
+```typescript
+deployEscrow(opts: DeployEscrowOptions): Promise<EscrowDeployResult>
+```
+
+Deploys a new `MilestoneEscrow` contract via the on-chain `EscrowFactory`. The escrow holds funds in milestone-sized chunks — the payer can fund each milestone independently, paying in installments rather than up-front.
+
+<ParamField path="payer" type="string" required>
+  Address of the payer (buyer / client).
+</ParamField>
+
+<ParamField path="payee" type="string" required>
+  Address of the payee (seller / contractor).
+</ParamField>
+
+<ParamField path="token" type="string" required>
+  Address of the stablecoin to use for payment. Must be whitelisted on the `EscrowFactory` contract.
+</ParamField>
+
+<ParamField path="milestones" type="EscrowMilestoneInput[]" required>
+  Array of milestone definitions. Each entry has `amount` (in wei) and an optional `descriptionHash` (bytes32 hex).
+</ParamField>
+
+<ParamField path="arbiter" type="string">
+  Address of a neutral third party who can resolve disputes. Defaults to `address(0)` (no arbiter).
+</ParamField>
+
+<ParamField path="timelockDurationSeconds" type="number">
+  How long after delivery the payer has to approve or dispute before the payee can claim automatically. Defaults to 7 days on-chain.
+</ParamField>
+
+**`EscrowDeployResult` fields:**
+
+<ResponseField name="escrowAddress" type="string">
+  Address of the deployed `MilestoneEscrow` contract.
+</ResponseField>
+
+<ResponseField name="totalAmount" type="bigint">
+  Sum of all milestone amounts in wei.
+</ResponseField>
+
+```typescript
+const escrowResult = await factory.deployEscrow({
+  payer:    "0xPayerAddress",
+  payee:    "0xPayeeAddress",
+  token:    "0xUSDCAddress",
+  milestones: [
+    { amount: ethers.parseUnits("5000", 6) },
+    { amount: ethers.parseUnits("5000", 6), descriptionHash: "0xabc..." },
+    { amount: ethers.parseUnits("10000", 6) },
+  ],
+  arbiter:                "0xArbitratorAddress",
+  timelockDurationSeconds: 7 * 24 * 60 * 60,
+});
+
+console.log("Escrow at:", escrowResult.escrowAddress);
+```
+
+---
+
+## Ramp Settlement Methods
+
+### `deployRampSettlement`
+
+```typescript
+deployRampSettlement(opts: DeployRampSettlementOptions): Promise<RampSettlementDeployResult>
+```
+
+Deploys an on-chain `RampSettlement` contract — the optional on-chain custody half of a fiat on/off-ramp flow. Off-ramp tokens are held here before the treasury receives them; on-ramp mints are attested here after the fact. Use `RampManager` for the off-chain provider orchestration side.
+
+<ParamField path="treasury" type="string" required>
+  Address that receives settled off-ramp token proceeds.
+</ParamField>
+
+<ParamField path="admin" type="string">
+  Address granted admin rights over the contract. Defaults to the connected signer.
+</ParamField>
+
+**`RampSettlementDeployResult` fields:**
+
+<ResponseField name="settlementAddress" type="string">
+  Address of the deployed `RampSettlement` contract.
+</ResponseField>
+
+<ResponseField name="treasury" type="string">
+  The treasury address as set on-chain.
+</ResponseField>
+
+---
+
+## Query Methods
+
+```typescript
+// ERC-20 tokens
+const tokens = await factory.getDeployedTokens();        // defaults to connected signer
+const total  = await factory.totalDeployed();
+
+// NFTs
+const nfts      = await factory.getDeployedNFTs();
+const nftCount  = await factory.totalDeployedNFTs();
+
+// Escrows
+const escrows      = await factory.getDeployedEscrows();
+const escrowCount  = await factory.totalDeployedEscrows();
+
+// Multi-tokens
+const multiTokens = await factory.getDeployedMultiTokens();
+const mtCount     = await factory.totalDeployedMultiTokens();
+
+// Ramp settlements
+const ramps     = await factory.getDeployedRampSettlements();
+const rampCount = await factory.totalDeployedRampSettlements();
+
+// Native balance (MATIC / ETH / BNB / XLM)
+const balance = await factory.getBalance();
+```
+
+All `getDeployedXxx()` methods accept an optional `address?: string` — omit it to query the connected signer's deployments, or pass any wallet address to query another deployer's history.
+
+---
+
+## Properties
+
+```typescript
+factory.adapter  // The underlying IAdapter (EVMAdapter or StellarAdapter)
+factory.network  // The SupportedNetwork string passed to the constructor
+```
+
+---
+
+## Type Reference
+
+```typescript
+type EVMSupportedNetwork =
+  | "polygon" | "polygon-amoy" | "ethereum"
+  | "bnb" | "celo" | "localhost";
+
+type StellarSupportedNetwork = "stellar" | "stellar-testnet";
+
+type SupportedNetwork = EVMSupportedNetwork | StellarSupportedNetwork;
+
+interface EVMAnkaraChainConfig {
+  network: EVMSupportedNetwork;
+  signer?: ethers.Signer;
+  provider?: ethers.Provider;
+  factoryAddress?: string;
+  nftFactoryAddress?: string;
+  escrowFactoryAddress?: string;
+  multiTokenFactoryAddress?: string;
+  rampSettlementFactoryAddress?: string;
+  rpcUrl?: string;
+}
+
+interface StellarAnkaraChainConfig {
+  network: StellarSupportedNetwork;
+  stellarSecretKey?: string;
+  stellarSigner?: StellarExternalSigner;
+  factoryAddress?: string;
+  nftFactoryAddress?: string;
+  escrowFactoryAddress?: string;
+  multiTokenFactoryAddress?: string;
+  rampSettlementFactoryAddress?: string;
+  rpcUrl?: string;
+}
+
+interface DeployResult {
+  tokenAddress: string;
+  txHash: string;
+  assetId: string;
+  template: AssetTemplate;
+  network: SupportedNetwork;
+  deployedAt: number;
+}
+```
+
+<Note>
+  All address overrides (`factoryAddress`, `nftFactoryAddress`, etc.) are optional. The SDK ships with default addresses for every supported network. You only need to set these when deploying to `"localhost"` or when pointing at a custom factory deployment.
+</Note>

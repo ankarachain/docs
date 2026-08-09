@@ -1,0 +1,387 @@
+---
+title: "Fiat On-Ramp and Off-Ramp with Ankara Chain"
+sidebarTitle: "Fiat Ramp"
+description: "Connect your token flows to local fiat currencies (NGN, KES, GHS) using Ankara Chain's pluggable RampManager and provider interface."
+---
+
+Fiat ramp flows bridge the gap between local currencies and on-chain tokens — they are the moment where a farmer in Kano pays NGN to receive RWA token shares, or an investor sells their position back into KES. Ankara Chain's `RampManager` splits this into two halves: an **off-chain provider** (quotes, session creation, and status polling against a real payment processor or a dev-mode stub) and an optional **on-chain settlement contract** (`RampSettlement`) that holds off-ramp custody and writes a permanent record of on-ramp mints. You can use either half on its own, or combine them for a fully verifiable ramp flow.
+
+---
+
+## Ramp providers
+
+A `RampProvider` is a pluggable interface — swap implementations without changing any calling code. The SDK ships two built-in providers; you can also write your own against the `RampProvider` interface, or use `createRampProvider()` to select one from a config object.
+
+### ManualRampProvider (dev / testing)
+
+`ManualRampProvider` uses in-memory sessions and configurable exchange rates — no real network calls, no API keys. It is the right default for local development and tests.
+
+```typescript
+import { ManualRampProvider, RampManager } from "@ankarachain/sdk";
+
+const provider = new ManualRampProvider({
+  // Rates: tokens per 1 unit of fiat
+  // Default: { NGN: 1/1500, KES: 1/150, GHS: 1/15 }
+  exchangeRates: { NGN: 1 / 1500, KES: 1 / 150, GHS: 1 / 15 },
+  feeBps:        100,  // 1% flat fee
+});
+
+const ramp = new RampManager(provider);
+```
+
+In tests, call `provider.markSettled(sessionId)` or `provider.markFailed(sessionId)` to simulate payment outcomes without any real fiat movement.
+
+### StellarAnchorProvider (SEP-24)
+
+`StellarAnchorProvider` connects to any Stellar-compatible anchor (Cowrie, MoneyGram, Bitso) purely by home domain. It handles SEP-10 authentication, SEP-24 interactive deposit/withdrawal, and optional SEP-38 quotes transparently.
+
+```typescript
+import { RampManager } from "@ankarachain/sdk";
+
+// Use the static factory method — it constructs the StellarAnchorProvider for you
+const ramp = RampManager.connectAnchor(
+  "cowrie.exchange",     // home domain of the anchor
+  freighterSigner,       // StellarExternalSigner (e.g. Freighter)
+  adapter,               // optional — provide if you also want on-chain settlement
+  { settlementAddress: "CSettlementContractId" }
+);
+```
+
+<Note>
+  `StellarAnchorProvider` makes real HTTP calls to the anchor on every method. Verify your chosen anchor's SEP-24 implementation on testnet before going live.
+</Note>
+
+### MoonPay
+
+To use MoonPay, pass a `RampProviderSelection` with `provider: "moonpay"` to `createRampProvider()`:
+
+```typescript
+import { createRampProvider, RampManager } from "@ankarachain/sdk";
+import type { RampProviderSelection } from "@ankarachain/sdk";
+
+const selection: RampProviderSelection = {
+  provider:  "moonpay",
+  apiKey:    process.env.MOONPAY_API_KEY!,
+  secretKey: process.env.MOONPAY_SECRET_KEY!,
+  sandbox:   true,   // remove for production
+};
+
+const provider = createRampProvider(selection);
+const ramp     = new RampManager(provider);
+```
+
+### Custom provider
+
+Implement the `RampProvider` interface to connect any payment processor — Yellow Card, Flutterwave, Transak, or your own API:
+
+```typescript
+import type {
+  RampProvider,
+  RampQuoteInput, RampQuote,
+  InitiateOnRampInput, InitiateOffRampInput,
+  RampSession, RampSessionStatus,
+} from "@ankarachain/sdk";
+
+class YellowCardProvider implements RampProvider {
+  readonly name = "yellow-card";
+
+  async getQuote(input: RampQuoteInput): Promise<RampQuote> {
+    // call Yellow Card's pricing API ...
+  }
+
+  async initiateOnRamp(input: InitiateOnRampInput): Promise<RampSession> {
+    // start a Yellow Card deposit session ...
+  }
+
+  async initiateOffRamp(input: InitiateOffRampInput): Promise<RampSession> {
+    // start a Yellow Card withdrawal session ...
+  }
+
+  async getStatus(sessionId: string): Promise<RampSessionStatus> {
+    // poll Yellow Card for status ...
+  }
+}
+```
+
+### createRampProvider()
+
+Use `createRampProvider()` for declarative provider selection from a config object — useful for reading provider settings from a database or environment variables without importing provider classes directly:
+
+```typescript
+import { createRampProvider } from "@ankarachain/sdk";
+
+const provider = createRampProvider({
+  provider: "manual",
+  exchangeRates: { NGN: 1 / 1500 },
+  feeBps: 150,
+});
+
+// or:
+const provider = createRampProvider({
+  provider:  "stellar-anchor",
+  homeDomain: "cowrie.exchange",
+  // Note: StellarAnchorProvider needs a signer — use RampManager.connectAnchor()
+  // for Stellar anchors to wire in the signer; createRampProvider is best for
+  // "manual" and "moonpay" which don't need one at construction time.
+});
+```
+
+---
+
+## Using separate providers per direction
+
+If your on-ramp and off-ramp go through different processors — for example MoonPay in, a Stellar anchor out — use `RampManager.withProviders()`:
+
+```typescript
+import { RampManager, ManualRampProvider, createRampProvider } from "@ankarachain/sdk";
+
+const ramp = RampManager.withProviders({
+  onRamp:  createRampProvider({ provider: "moonpay", apiKey: "...", secretKey: "..." }),
+  offRamp: new ManualRampProvider(),
+});
+```
+
+---
+
+## Getting a quote
+
+Call `ramp.getQuote()` before initiating a session to show the user what they'll pay or receive. Provide either `fiatAmount` or `tokenAmount` — not both:
+
+```typescript
+import type { RampQuoteInput, RampQuote } from "@ankarachain/sdk";
+
+const input: RampQuoteInput = {
+  direction:    "on-ramp",
+  fiatCurrency: "NGN",
+  tokenSymbol:  "mUSD",
+  countryCode:  "NG",
+  fiatAmount:   "150000",   // user wants to spend 150 000 NGN
+};
+
+const quote: RampQuote = await ramp.getQuote(input);
+
+console.log(`${quote.fiatAmount} ${quote.fiatCurrency}`);
+  // "150000.00 NGN"
+console.log(`→ ${quote.tokenAmount} ${quote.tokenSymbol}`);
+  // "→ 100.000000 mUSD"
+console.log(`Rate: ${quote.exchangeRate}`);
+  // "Rate: 0.0006666666..."
+console.log(`Fee:  ${quote.feeFiat} ${quote.fiatCurrency}`);
+  // "Fee:  1500.00 NGN"
+console.log(`Expires: ${new Date(quote.expiresAt * 1000).toISOString()}`);
+```
+
+`RampQuote` shape:
+
+```typescript
+interface RampQuote {
+  direction:    "on-ramp" | "off-ramp";
+  fiatCurrency: string;   // e.g. "NGN"
+  fiatAmount:   string;
+  tokenAmount:  string;
+  tokenSymbol:  string;
+  exchangeRate: string;
+  feeFiat:      string;   // flat fee in fiat units
+  expiresAt:    number;   // Unix seconds
+}
+```
+
+---
+
+## Initiating an on-ramp
+
+An on-ramp session creates a payment URL where the user completes fiat payment. After they pay, the provider triggers a webhook (or you poll `getStatus`) and you mint the corresponding tokens.
+
+```typescript
+import type { InitiateOnRampInput, RampSession } from "@ankarachain/sdk";
+
+const input: InitiateOnRampInput = {
+  fiatAmount:        "150000",
+  fiatCurrency:      "NGN",
+  tokenSymbol:       "mUSD",
+  recipientAddress:  "0xInvestorAddress",
+  countryCode:       "NG",
+  customerReference: "ORDER-2025-001",   // optional — your internal reference
+};
+
+const session: RampSession = await ramp.initiateOnRamp(input);
+
+console.log("Session ID: ", session.sessionId);
+console.log("Payment URL:", session.paymentUrl);  // redirect the user here
+console.log("Status:     ", session.status);       // RampSessionStatus.PENDING
+```
+
+Poll for status:
+
+```typescript
+import { RampSessionStatus } from "@ankarachain/sdk";
+
+const status = await ramp.getStatus(session.sessionId);
+
+if (status === RampSessionStatus.SETTLED) {
+  // payment confirmed — mint tokens to the recipient
+  await registry.mint("0xInvestorAddress", ethers.parseEther("100"));
+}
+```
+
+---
+
+## Initiating an off-ramp
+
+An off-ramp session accepts a `RampPayoutAccount` that describes the user's bank or mobile-money account:
+
+```typescript
+import type { InitiateOffRampInput, RampPayoutAccount } from "@ankarachain/sdk";
+
+// Bank account
+const payoutAccount: RampPayoutAccount = {
+  type:          "bank",
+  accountNumber: "0123456789",
+  accountName:   "Amara Okafor",
+  bankCode:      "058",   // Guaranty Trust Bank Nigeria
+};
+
+// — or — mobile money
+const payoutAccount: RampPayoutAccount = {
+  type:          "mobile-money",
+  accountNumber: "+254712345678",
+  accountName:   "Wanjiru Kamau",
+  provider:      "M-Pesa",
+};
+
+const input: InitiateOffRampInput = {
+  tokenAmount:  "100",
+  tokenSymbol:  "mUSD",
+  fiatCurrency: "NGN",
+  payoutAccount,
+  countryCode:  "NG",
+};
+
+const session = await ramp.initiateOffRamp(input);
+console.log("Off-ramp session:", session.sessionId);
+```
+
+---
+
+## On-chain settlement (optional)
+
+The `RampSettlement` contract provides a custody layer and an on-chain audit trail. Deploy one per platform (not per user):
+
+```typescript
+import type { DeployRampSettlementOptions } from "@ankarachain/sdk";
+
+const opts: DeployRampSettlementOptions = {
+  treasury: "0xTreasuryAddress",  // receives confirmed off-ramp tokens
+};
+
+const settlementResult = await factory.deployRampSettlement(opts);
+console.log("Settlement contract:", settlementResult.settlementAddress);
+```
+
+Then pass the settlement address to `RampManager`:
+
+```typescript
+const ramp = new RampManager(provider, factory.adapter, {
+  settlementAddress: settlementResult.settlementAddress,
+});
+```
+
+### depositOffRamp
+
+After the user initiates an off-ramp session, they deposit their tokens into the settlement contract. On EVM, approve the contract first:
+
+```typescript
+// EVM: approve the settlement contract to spend the off-ramp amount
+const token = new ethers.Contract(mUSDAddress, erc20Abi, signer);
+await token.approve(ramp.settlementAddress, ethers.parseEther("100"));
+
+// Deposit — tokens move from the user's wallet to the settlement contract
+const txHash = await ramp.depositOffRamp(
+  session.sessionId,
+  mUSDAddress,
+  ethers.parseEther("100")
+);
+```
+
+### confirmOffRampSettlement
+
+Once the provider confirms the fiat payout succeeded, release the custodied tokens to the treasury:
+
+```typescript
+const txHash = await ramp.confirmOffRampSettlement(session.sessionId);
+console.log("Settlement confirmed:", txHash);
+```
+
+### recordOnRampSettlement
+
+Record an attestation that an on-ramp mint happened. This does not move funds — call it after you have already minted the tokens:
+
+```typescript
+await ramp.recordOnRampSettlement(
+  session.sessionId,
+  "0xInvestorAddress",
+  mUSDAddress,
+  ethers.parseEther("100")
+);
+```
+
+---
+
+## CLI ramp commands
+
+```bash
+# Get a quote
+ankara ramp-quote \
+  --direction on-ramp \
+  --fiat-currency NGN \
+  --token-symbol mUSD \
+  --fiat-amount 150000
+
+# Initiate an on-ramp session
+ankara onramp-initiate \
+  --fiat-amount 150000 \
+  --fiat-currency NGN \
+  --token-symbol mUSD \
+  --recipient 0xInvestorAddress
+
+# Initiate an off-ramp session
+ankara offramp-initiate \
+  --token-amount 100 \
+  --token-symbol mUSD \
+  --fiat-currency NGN \
+  --payout-type bank \
+  --account-number 0123456789 \
+  --bank-code 058
+
+# Poll session status
+ankara ramp-status --session-id <sessionId>
+
+# Confirm an off-ramp settlement (platform admin)
+ankara offramp-confirm --session-id <sessionId>
+```
+
+---
+
+## Supported fiat currencies
+
+| Code  | Country / Region |
+|-------|------------------|
+| `NGN` | Nigeria          |
+| `GHS` | Ghana            |
+| `KES` | Kenya            |
+
+Additional currencies can be supported by configuring custom exchange rates in `ManualRampProvider`, or by connecting an anchor / payment processor that covers those markets.
+
+---
+
+## RampSessionStatus reference
+
+```typescript
+enum RampSessionStatus {
+  PENDING    = "pending",     // session created, awaiting user action
+  PROCESSING = "processing",  // fiat payment received, clearing in progress
+  SETTLED    = "settled",     // fiat confirmed — safe to mint / release tokens
+  FAILED     = "failed",      // payment failed or expired
+  REFUNDED   = "refunded",    // tokens returned to depositor (off-ramp)
+}
+```

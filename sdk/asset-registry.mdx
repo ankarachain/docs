@@ -1,0 +1,628 @@
+---
+title: "AssetRegistry: Read and Update On-Chain Asset Metadata"
+sidebarTitle: "AssetRegistry"
+description: "AssetRegistry lets you read and update metadata on deployed Ankara Chain tokens — status, valuation, country code, and template-specific fields."
+---
+
+`AssetRegistry` is the SDK class for reading and writing metadata on an already-deployed Ankara Chain token. Pass it the adapter you used to configure `TokenFactory`, the token's contract address, and the asset template string — it then exposes a fully typed method surface for every operation supported by that template.
+
+<Note>
+  `AssetRegistry` wraps an **existing** token; it does not deploy new ones. Use `TokenFactory` to deploy first, then construct an `AssetRegistry` with the returned `tokenAddress`.
+</Note>
+
+## Import
+
+```typescript
+import { AssetRegistry, AssetStatus } from "@ankarachain/sdk";
+```
+
+---
+
+## Constructor
+
+```typescript
+new AssetRegistry(adapter: IAdapter, tokenAddress: string, template: AssetTemplate | NFTAssetTemplate)
+```
+
+<ParamField path="adapter" type="IAdapter" required>
+  The `EVMAdapter` or `StellarAdapter` instance. Obtain it from `tokenFactory.adapter` or construct one directly.
+</ParamField>
+
+<ParamField path="tokenAddress" type="string" required>
+  The deployed token contract address (EVM hex address or Stellar contract ID).
+</ParamField>
+
+<ParamField path="template" type="AssetTemplate | NFTAssetTemplate" required>
+  The asset template the token was deployed with. Must match the on-chain contract — the registry uses this to route calls to the correct ABI methods.
+
+  Fungible templates: `"farmland"` | `"commodity"` | `"real-estate"` | `"invoice"` | `"carbon-credit"` | `"mining-rights"`
+
+  NFT templates: `"farmland-nft"` | `"real-estate-nft"` | `"mining-rights-nft"` | `"commodity-vault-nft"`
+</ParamField>
+
+```typescript
+import { AssetRegistry } from "@ankarachain/sdk";
+
+const registry = new AssetRegistry(
+  factory.adapter,
+  "0xYourTokenAddress",
+  "farmland"
+);
+```
+
+---
+
+## Generic Read Methods
+
+These methods work on all fungible templates.
+
+### `getName`
+
+```typescript
+getName(): Promise<string>
+```
+
+Returns the token name set at deployment time.
+
+```typescript
+const name = await registry.getName();
+// "Kano Farmland Token"
+```
+
+---
+
+### `getSymbol`
+
+```typescript
+getSymbol(): Promise<string>
+```
+
+Returns the ticker symbol.
+
+---
+
+### `getTotalSupply`
+
+```typescript
+getTotalSupply(): Promise<bigint>
+```
+
+Returns the total token supply in wei.
+
+---
+
+### `getBalanceOf`
+
+```typescript
+getBalanceOf(address: string): Promise<bigint>
+```
+
+Returns the token balance of a given wallet address in wei.
+
+<ParamField path="address" type="string" required>
+  The wallet or contract address to query.
+</ParamField>
+
+```typescript
+const balance = await registry.getBalanceOf("0xInvestorAddress");
+```
+
+---
+
+### `getStatus`
+
+```typescript
+getStatus(): Promise<AssetStatus>
+```
+
+Returns the current lifecycle status of the token.
+
+<ResponseField name="AssetStatus" type="enum">
+  `DRAFT (0)` · `ACTIVE (1)` · `SUSPENDED (2)` · `REDEEMED (3)` · `EXPIRED (4)`
+</ResponseField>
+
+```typescript
+import { AssetStatus } from "@ankarachain/sdk";
+
+const status = await registry.getStatus();
+if (status === AssetStatus.SUSPENDED) {
+  console.warn("Token transfers are currently suspended.");
+}
+```
+
+---
+
+### `getCountryCode`
+
+```typescript
+getCountryCode(): Promise<string>
+```
+
+Returns the ISO 3166-1 alpha-2 country code stored on-chain at deployment.
+
+---
+
+### `getIdentityVerifier`
+
+```typescript
+getIdentityVerifier(): Promise<string>
+```
+
+Returns the address of the configured identity verifier contract. Returns the zero address if no KYC gating is active.
+
+---
+
+### `getVersion`
+
+```typescript
+getVersion(): Promise<number>
+```
+
+Returns the on-chain metadata version number. This increments each time an admin update is recorded, providing a simple audit trail.
+
+---
+
+### `getMetadata`
+
+```typescript
+getMetadata(): Promise<AnyAssetMetadata>
+```
+
+Returns the full template-specific metadata struct. The return type is the union of all metadata interfaces — narrow it using the template you passed to the constructor.
+
+```typescript
+import type { FarmlandMetadata } from "@ankarachain/sdk";
+
+const meta = await registry.getMetadata() as FarmlandMetadata;
+console.log("Area:", meta.areaSqMeters, "m²");
+console.log("Valuation: $", meta.valuationUSD);
+```
+
+---
+
+### `getValuationUSD`
+
+```typescript
+getValuationUSD(): Promise<bigint>
+```
+
+Returns the most recent USD valuation stored in the metadata, in wei (1e18 = $1).
+
+---
+
+## Generic Write Methods
+
+These methods work on all fungible templates and require the appropriate on-chain role (typically `DEFAULT_ADMIN_ROLE` or `MANAGER_ROLE`).
+
+### `setStatus`
+
+```typescript
+setStatus(newStatus: AssetStatus): Promise<string>
+```
+
+Updates the asset lifecycle status. Returns the transaction hash.
+
+<ParamField path="newStatus" type="AssetStatus" required>
+  The target status. Import `AssetStatus` from `@ankarachain/sdk`.
+</ParamField>
+
+```typescript
+import { AssetStatus } from "@ankarachain/sdk";
+
+const txHash = await registry.setStatus(AssetStatus.ACTIVE);
+```
+
+---
+
+### `setIdentityVerifier`
+
+```typescript
+setIdentityVerifier(verifierAddress: string): Promise<string>
+```
+
+Sets or replaces the KYC identity verifier. Pass the zero address (`"0x0000000000000000000000000000000000000000"`) to remove KYC gating.
+
+<ParamField path="verifierAddress" type="string" required>
+  Address of the verifier contract, or the zero address to disable verification.
+</ParamField>
+
+---
+
+### `mint`
+
+```typescript
+mint(to: string, amount: bigint): Promise<string>
+```
+
+Mints new tokens to the specified address. Requires `MINTER_ROLE`.
+
+<ParamField path="to" type="string" required>
+  Recipient wallet address.
+</ParamField>
+
+<ParamField path="amount" type="bigint" required>
+  Amount in wei.
+</ParamField>
+
+---
+
+### `pause`
+
+```typescript
+pause(): Promise<string>
+```
+
+Pauses all token transfers. Requires admin role.
+
+---
+
+### `unpause`
+
+```typescript
+unpause(): Promise<string>
+```
+
+Resumes token transfers after a pause.
+
+---
+
+## Farmland & Real Estate Methods
+
+### `updateValuation`
+
+```typescript
+updateValuation(newValuationUSD: bigint): Promise<string>
+```
+
+Updates the USD valuation stored in the token's metadata. Available on `farmland` and `real-estate` templates only.
+
+<ParamField path="newValuationUSD" type="bigint" required>
+  New valuation in wei (e.g. `150_000n * 10n ** 18n` for $150,000).
+</ParamField>
+
+```typescript
+// Update farmland valuation to $180,000
+const txHash = await registry.updateValuation(180_000n * 10n ** 18n);
+```
+
+---
+
+## Real Estate Methods
+
+### `updateOccupancyStatus`
+
+```typescript
+updateOccupancyStatus(newStatus: string): Promise<string>
+```
+
+Updates the occupancy status. Only available on the `real-estate` template.
+
+<ParamField path="newStatus" type="string" required>
+  One of `"Vacant"`, `"Owner-occupied"`, or `"Tenanted"`.
+</ParamField>
+
+---
+
+### `declareRentalDistribution`
+
+```typescript
+declareRentalDistribution(amountUSD: bigint): Promise<string>
+```
+
+Records a rental income distribution event on-chain for audit purposes. Only available on the `real-estate` template.
+
+<ParamField path="amountUSD" type="bigint" required>
+  Total distribution amount in USD wei.
+</ParamField>
+
+---
+
+## Commodity Methods
+
+### `isExpired`
+
+```typescript
+isExpired(): Promise<boolean>
+```
+
+Returns `true` if the commodity's `expiryDate` has passed. Only available on the `commodity` template.
+
+---
+
+### `markExpired`
+
+```typescript
+markExpired(): Promise<string>
+```
+
+Marks the commodity token as expired on-chain, transitioning its status accordingly. Only available on the `commodity` template.
+
+---
+
+## Invoice Methods
+
+### `getInvoiceStatus`
+
+```typescript
+getInvoiceStatus(): Promise<InvoiceStatus>
+```
+
+Returns the invoice's payment lifecycle status. Only available on the `invoice` template.
+
+<ResponseField name="InvoiceStatus" type="enum">
+  `PENDING (0)` · `FUNDED (1)` · `REPAID (2)` · `DEFAULTED (3)`
+</ResponseField>
+
+---
+
+### `isOverdue`
+
+```typescript
+isOverdue(): Promise<boolean>
+```
+
+Returns `true` if the invoice is past its due date and still in `PENDING` or `FUNDED` status.
+
+---
+
+### `markFunded`
+
+```typescript
+markFunded(): Promise<string>
+```
+
+Transitions the invoice from `PENDING` to `FUNDED`. Call this once the investor has funded the invoice.
+
+---
+
+### `markRepaid`
+
+```typescript
+markRepaid(): Promise<string>
+```
+
+Transitions the invoice to `REPAID`. Call this once the debtor has settled the invoice.
+
+---
+
+### `markDefaulted`
+
+```typescript
+markDefaulted(reason: string): Promise<string>
+```
+
+Marks the invoice as `DEFAULTED` and records a human-readable reason on-chain.
+
+<ParamField path="reason" type="string" required>
+  Free-text reason for default, e.g. `"Debtor insolvent — court reference NG/2024/0042"`.
+</ParamField>
+
+---
+
+## Carbon Credit Methods
+
+### `retire`
+
+```typescript
+retire(amount: bigint, beneficiary: string, note: string): Promise<string>
+```
+
+Burns carbon credits and records an immutable retirement event on-chain. Only available on the `carbon-credit` template.
+
+<ParamField path="amount" type="bigint" required>
+  Amount of credits to retire, in wei (1e18 = 1 tCO₂e).
+</ParamField>
+
+<ParamField path="beneficiary" type="string" required>
+  Entity on whose behalf the offset is being made (can be a name string stored as calldata, or an address).
+</ParamField>
+
+<ParamField path="note" type="string" required>
+  Reason or project reference, e.g. `"Flight offset — Abuja–Lagos Q1 2025"`.
+</ParamField>
+
+```typescript
+const txHash = await registry.retire(
+  10n * 10n ** 18n,            // retire 10 tCO2e
+  "Acme Corp Lagos Office",
+  "Annual Scope 1 offset 2025"
+);
+```
+
+---
+
+### `getTotalRetired`
+
+```typescript
+getTotalRetired(): Promise<bigint>
+```
+
+Returns the cumulative amount of credits retired in wei.
+
+---
+
+### `getTotalRetirements`
+
+```typescript
+getTotalRetirements(): Promise<number>
+```
+
+Returns the total number of retirement events recorded.
+
+---
+
+### `getRetirement`
+
+```typescript
+getRetirement(index: number): Promise<RetirementRecord>
+```
+
+Returns a specific retirement event by its zero-based index.
+
+<ResponseField name="retiredBy" type="string">
+  Wallet address that called `retire()`.
+</ResponseField>
+
+<ResponseField name="amount" type="bigint">
+  Credits retired in that event, in wei.
+</ResponseField>
+
+<ResponseField name="timestamp" type="bigint">
+  Unix timestamp of the retirement.
+</ResponseField>
+
+<ResponseField name="beneficiary" type="string">
+  The beneficiary string passed to `retire()`.
+</ResponseField>
+
+<ResponseField name="retirementNote" type="string">
+  The note string passed to `retire()`.
+</ResponseField>
+
+---
+
+## Mining Rights Methods
+
+### `isLicenseExpired`
+
+```typescript
+isLicenseExpired(): Promise<boolean>
+```
+
+Returns `true` if the mining licence has passed its `licenseExpiry` timestamp.
+
+---
+
+### `renewLicense`
+
+```typescript
+renewLicense(newExpiry: bigint): Promise<string>
+```
+
+Extends the licence expiry date on-chain.
+
+<ParamField path="newExpiry" type="bigint" required>
+  New Unix timestamp for licence expiry.
+</ParamField>
+
+---
+
+### `markLicenseExpired`
+
+```typescript
+markLicenseExpired(): Promise<string>
+```
+
+Manually records the licence as expired on-chain.
+
+---
+
+### `declareRoyalty`
+
+```typescript
+declareRoyalty(extractionValueUSD: bigint): Promise<string>
+```
+
+Records a royalty declaration event based on extraction value. The royalty amount is calculated on-chain from the token's `royaltyRateBps` setting.
+
+<ParamField path="extractionValueUSD" type="bigint" required>
+  Total extraction value in USD wei for the period being declared.
+</ParamField>
+
+---
+
+## NFT Methods
+
+The following methods are only available when the `AssetRegistry` is constructed with an NFT template (`"farmland-nft"`, `"real-estate-nft"`, `"mining-rights-nft"`, `"commodity-vault-nft"`).
+
+### `getTokenMetadata`
+
+```typescript
+getTokenMetadata(tokenId: number): Promise<unknown>
+```
+
+Returns the metadata stored for a specific NFT token ID.
+
+---
+
+### `getTokenVersion`
+
+```typescript
+getTokenVersion(tokenId: number): Promise<number>
+```
+
+Returns the metadata version for a specific token ID.
+
+---
+
+### `ownerOf`
+
+```typescript
+ownerOf(tokenId: number): Promise<string>
+```
+
+Returns the current owner of the given token ID.
+
+---
+
+### `linkToERC20`
+
+```typescript
+linkToERC20(erc20Address: string): Promise<string>
+```
+
+Links the NFT collection to a corresponding ERC-20 fungible token, enabling NFT ↔ fungible interoperability.
+
+<ParamField path="erc20Address" type="string" required>
+  Address of the ERC-20 token to link.
+</ParamField>
+
+---
+
+## Properties
+
+```typescript
+registry.address   // The token contract address passed to the constructor
+registry.template  // The template string passed to the constructor
+```
+
+---
+
+## Type Reference
+
+```typescript
+enum AssetStatus {
+  DRAFT     = 0,
+  ACTIVE    = 1,
+  SUSPENDED = 2,
+  REDEEMED  = 3,
+  EXPIRED   = 4,
+}
+
+enum InvoiceStatus {
+  PENDING   = 0,
+  FUNDED    = 1,
+  REPAID    = 2,
+  DEFAULTED = 3,
+}
+
+interface RetirementRecord {
+  retiredBy:      string;
+  amount:         bigint;
+  timestamp:      bigint;
+  beneficiary:    string;
+  retirementNote: string;
+}
+
+type AssetTemplate =
+  | "farmland" | "commodity" | "real-estate"
+  | "invoice"  | "carbon-credit" | "mining-rights";
+
+type NFTAssetTemplate =
+  | "farmland-nft" | "real-estate-nft"
+  | "mining-rights-nft" | "commodity-vault-nft";
+```
+
+<Note>
+  Template-specific methods (`updateValuation`, `retire`, etc.) throw a descriptive `Error` at runtime if called on a registry constructed with a different template. This is a developer-safety guard — the TypeScript types do not currently enforce the constraint at compile time, because the registry uses a single union template type.
+</Note>

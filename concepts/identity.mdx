@@ -1,0 +1,139 @@
+---
+title: "Pluggable KYC and Identity Verification in Ankara Chain"
+sidebarTitle: "Identity & KYC"
+description: "Ankara Chain's IIdentityVerifier interface lets you connect any KYC provider — Smile Identity, Persona, or custom — without modifying your core contracts."
+---
+
+Ankara Chain provides the interface and the enforcement hook — you supply the KYC provider. Every token and escrow contract in Ankara Chain supports an optional identity verifier: a separate smart contract whose sole job is to answer the question "is this address verified?" When a verifier is attached, the token contract calls it on every transfer and mint, and rejects unverified addresses automatically. You decide which KYC or identity system backs that contract.
+
+## What `IIdentityVerifier` Does
+
+The `IIdentityVerifier` interface defines a single on-chain gate: any address attempting to receive tokens or trigger sensitive operations must pass the verifier's check before the transaction proceeds. The verifier contract lives at a separate address from your token — you can swap it out, upgrade it, or attach the same verifier to multiple tokens without redeploying any of them.
+
+This separation means:
+- Your token contracts never contain KYC logic directly.
+- You can update your verification rules without touching deployed tokens.
+- The same verifier can gate transfers across multiple asset types (farmland, invoices, real estate) simultaneously.
+
+## Attaching a Verifier at Deploy Time
+
+Pass the deployed address of your verifier contract as `identityVerifier` in any deploy options object. The `identityVerifier` field is available on every fungible token template, NFT template, and escrow deploy options type.
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+import { ethers } from "ethers";
+
+const factory = new TokenFactory({ network: "polygon", signer });
+
+const result = await factory.deployFarmland({
+  name: "Kano Farmland Token",
+  symbol: "KFT",
+  assetId: "kano-001",
+  countryCode: "NG",
+  identityVerifier: "0xYourVerifierContractAddress", // attach your KYC contract
+  metadata: {
+    location: "Kano State, Nigeria",
+    areaSqMeters: 50000n,
+    soilType: "Clay loam",
+    irrigationType: "Rain-fed",
+    cropHistory: "Maize, Sorghum",
+    titleDocumentHash: "0xabc123...",
+    valuationUSD: 120000000000000000000000n, // $120,000 in wei
+    stateRegion: "Kano",
+    lastUpdated: BigInt(Math.floor(Date.now() / 1000)),
+  },
+});
+
+console.log("Token deployed at:", result.tokenAddress);
+```
+
+You can also attach or change a verifier on an already-deployed token using `AssetRegistry`:
+
+```typescript
+import { AssetRegistry } from "@ankarachain/sdk";
+
+const registry = new AssetRegistry({ network: "polygon", signer });
+
+await registry.setIdentityVerifier(
+  result.tokenAddress,
+  "farmland",
+  "0xNewVerifierAddress"
+);
+```
+
+## Deploying Without a Verifier
+
+Pass `identityVerifier: undefined` (or omit the field entirely) to deploy with no KYC gating. The token operates in permissionless mode — any address can receive tokens and interact with the contract.
+
+```typescript
+const result = await factory.deployFarmland({
+  name: "Open Farmland Token",
+  symbol: "OFT",
+  assetId: "open-001",
+  countryCode: "GH",
+  // identityVerifier omitted — no KYC gating
+  metadata: { ... },
+});
+```
+
+<Warning>
+  Permissionless mode is appropriate for development, testing, and certain open-access token structures. For any token representing a regulated asset — or where your compliance programme requires transfer restrictions — you should attach a verifier before setting the token's status to `ACTIVE`.
+</Warning>
+
+## Supported Identity Systems
+
+Ankara Chain's hooks are designed to accommodate identity systems common in African markets. Your verifier contract can back itself against any of these (or any other identity provider) — the token contract simply calls the verifier's on-chain interface and does not care what backs it.
+
+<CardGroup cols={2}>
+  <Card title="BVN / NIN (Nigeria)" icon="id-card">
+    Bank Verification Number and National Identification Number. Hook your verifier into Smile Identity or a similar provider to confirm an address holder has passed BVN/NIN verification.
+  </Card>
+  <Card title="Huduma Namba (Kenya)" icon="id-card">
+    Kenya's national ID system. Wire your verifier to a KYC provider that checks Huduma Namba validity before whitelisting an address.
+  </Card>
+  <Card title="Ghana Card" icon="id-card">
+    Ghana's biometric national ID. Connect your verifier to a Ghanaian KYC provider that validates Ghana Card numbers against the NIA database.
+  </Card>
+  <Card title="Custom / enterprise" icon="building">
+    Any identity system — Persona, Sumsub, Jumio, or an internal employee registry. If you can expose an on-chain boolean ("is this address verified?"), you can wire it into Ankara Chain.
+  </Card>
+</CardGroup>
+
+<Note>
+  These identity systems are **hookable, not built-in**. Ankara Chain does not ship integrations with Smile Identity, Persona, or any national ID database. You implement the verifier contract against your chosen provider; the SDK only tells your token where that contract lives.
+</Note>
+
+## The Built-in WhitelistVerifier
+
+For development and testing, Ankara Chain ships a `WhitelistVerifier` contract. It maintains a simple admin-controlled list of approved addresses — no external API calls, no identity provider, no production KYC.
+
+```typescript
+// Deploy a WhitelistVerifier and use it during development
+const result = await factory.deployFarmland({
+  name: "Test Farmland Token",
+  symbol: "TFTK",
+  assetId: "test-001",
+  countryCode: "NG",
+  identityVerifier: "0xWhitelistVerifierAddress", // pre-deployed WhitelistVerifier
+  metadata: { ... },
+});
+```
+
+The `WhitelistVerifier` address for your target network is available from the CLI after running `ankara deploy-factory`. Use it freely in development; replace it with a production KYC verifier before going to mainnet.
+
+<Tip>
+  The `WhitelistVerifier` is also useful for closed pilot programmes where you need a small, manually managed list of approved participants — for example, a farmland cooperative with 50 known members — without integrating a full KYC provider.
+</Tip>
+
+## Changing a Verifier After Deployment
+
+You can swap the verifier on any deployed token at any time using `assetSetIdentityVerifier()` through the `AssetRegistry`, or the equivalent `escrowSetIdentityVerifier()` method on deployed escrow contracts. The change takes effect immediately on the next transaction — no token migration or redeployment required.
+
+```typescript
+// Migrate from WhitelistVerifier to a production KYC verifier
+await registry.setIdentityVerifier(
+  tokenAddress,
+  "real-estate",
+  "0xProductionKYCVerifierAddress"
+);
+```

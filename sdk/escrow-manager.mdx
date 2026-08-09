@@ -1,0 +1,514 @@
+---
+title: "EscrowManager: Drive Milestone Escrow Contract Lifecycle"
+sidebarTitle: "EscrowManager"
+description: "EscrowManager reads and drives the lifecycle of a deployed MilestoneEscrow — funding milestones, marking delivery, approving releases, and handling disputes."
+---
+
+`EscrowManager` gives you a typed API for every operation on a deployed `MilestoneEscrow` contract. The payer funds individual milestones, the payee marks them delivered, and the payer approves release — with optional arbiter-driven dispute resolution and a timelock auto-release safety net. It works identically against both an EVM `MilestoneEscrow.sol` and a Soroban `milestone-escrow` contract — pass the appropriate adapter.
+
+## Import
+
+```typescript
+import { EscrowManager, MilestoneStatus } from "@ankarachain/sdk";
+```
+
+---
+
+## Constructor
+
+```typescript
+new EscrowManager(adapter: IAdapter, escrowAddress: string)
+```
+
+<ParamField path="adapter" type="IAdapter" required>
+  The `EVMAdapter` or `StellarAdapter` connected to the network where the escrow is deployed. Obtain it from `tokenFactory.adapter` or construct one directly.
+</ParamField>
+
+<ParamField path="escrowAddress" type="string" required>
+  The deployed `MilestoneEscrow` contract address (EVM hex address or Stellar contract ID).
+</ParamField>
+
+```typescript
+import { EscrowManager } from "@ankarachain/sdk";
+
+const escrow = new EscrowManager(factory.adapter, "0xEscrowContractAddress");
+```
+
+---
+
+## Read Methods
+
+### `getPayer`
+
+```typescript
+getPayer(): Promise<string>
+```
+
+Returns the address of the payer (the party funding the escrow).
+
+---
+
+### `getPayee`
+
+```typescript
+getPayee(): Promise<string>
+```
+
+Returns the address of the payee (the party receiving released funds).
+
+---
+
+### `getArbiter`
+
+```typescript
+getArbiter(): Promise<string>
+```
+
+Returns the arbiter's address. Returns the zero address if no arbiter was configured at deployment.
+
+---
+
+### `getToken`
+
+```typescript
+getToken(): Promise<string>
+```
+
+Returns the address of the ERC-20 / SEP-41 stablecoin held by the escrow.
+
+---
+
+### `getTotalAmount`
+
+```typescript
+getTotalAmount(): Promise<bigint>
+```
+
+Returns the sum of all milestone amounts in wei.
+
+---
+
+### `isFunded`
+
+```typescript
+isFunded(): Promise<boolean>
+```
+
+Returns `true` if at least one milestone has been funded.
+
+---
+
+### `isCancelled`
+
+```typescript
+isCancelled(): Promise<boolean>
+```
+
+Returns `true` if both parties voted to cancel and the deal was cancelled.
+
+---
+
+### `milestoneCount`
+
+```typescript
+milestoneCount(): Promise<number>
+```
+
+Returns the total number of milestones defined in the escrow.
+
+---
+
+### `getMilestone`
+
+```typescript
+getMilestone(milestoneId: number): Promise<Milestone>
+```
+
+Returns the full state of a single milestone.
+
+<ParamField path="milestoneId" type="number" required>
+  Zero-based milestone index.
+</ParamField>
+
+<ResponseField name="amount" type="bigint">
+  The milestone's locked amount in wei.
+</ResponseField>
+
+<ResponseField name="descriptionHash" type="string">
+  A `bytes32` hex string — the IPFS or off-chain document hash describing the deliverable.
+</ResponseField>
+
+<ResponseField name="status" type="MilestoneStatus">
+  Current status: `PENDING (0)` · `DELIVERED (1)` · `DISPUTED (2)` · `RELEASED (3)` · `REFUNDED (4)`
+</ResponseField>
+
+<ResponseField name="deliveredAt" type="bigint">
+  Unix timestamp when the payee called `markDelivered()`. Zero if not yet delivered.
+</ResponseField>
+
+<ResponseField name="funded" type="boolean">
+  Whether the payer has funded this milestone yet.
+</ResponseField>
+
+```typescript
+const milestone = await escrow.getMilestone(0);
+console.log("Status:", MilestoneStatus[milestone.status]);
+console.log("Amount:", milestone.amount);
+console.log("Funded:", milestone.funded);
+```
+
+---
+
+### `getAllMilestones`
+
+```typescript
+getAllMilestones(): Promise<Milestone[]>
+```
+
+Fetches all milestones in a single call by internally iterating from `0` to `milestoneCount() - 1`. Convenient for dashboard views.
+
+```typescript
+const milestones = await escrow.getAllMilestones();
+milestones.forEach((m, i) => {
+  console.log(`Milestone ${i}: ${MilestoneStatus[m.status]} — ${m.amount} wei`);
+});
+```
+
+---
+
+### `remainingBalance`
+
+```typescript
+remainingBalance(): Promise<bigint>
+```
+
+Returns the total amount still locked in the escrow that has not yet been released or refunded.
+
+---
+
+### `getActivity`
+
+```typescript
+getActivity(): Promise<EscrowActivityEvent[]>
+```
+
+Returns the full on-chain event history for this deal, sorted oldest-first.
+
+<ResponseField name="type" type="EscrowActivityType">
+  One of: `"funded"` · `"delivered"` · `"released"` · `"disputed"` · `"resolved"` · `"refunded"` · `"cancel-vote"` · `"cancelled"` · `"arbiter-changed"`
+</ResponseField>
+
+<ResponseField name="milestoneId" type="number | undefined">
+  Present for milestone-scoped events; absent for deal-level events like `"cancelled"`.
+</ResponseField>
+
+<ResponseField name="txHash" type="string">
+  The transaction hash of the event.
+</ResponseField>
+
+<ResponseField name="timestamp" type="number">
+  Unix seconds. `0` if the underlying event did not carry a resolvable timestamp.
+</ResponseField>
+
+```typescript
+const activity = await escrow.getActivity();
+activity.forEach(event => {
+  const scope = event.milestoneId != null ? ` (milestone ${event.milestoneId})` : "";
+  console.log(`[${event.type}]${scope} — tx: ${event.txHash}`);
+});
+```
+
+---
+
+## Lifecycle Write Methods
+
+### `fund`
+
+```typescript
+fund(milestoneId: number): Promise<string>
+```
+
+Deposits the milestone's amount into the escrow. **Payer only.** Milestones are funded individually — you can fund them one at a time rather than paying the full deal amount upfront.
+
+On EVM, you must approve the escrow contract to spend the required token amount before calling `fund()`. On Stellar, the nested token transfer is authorized within the same call.
+
+<ParamField path="milestoneId" type="number" required>
+  Zero-based index of the milestone to fund.
+</ParamField>
+
+```typescript
+// EVM: approve first
+const token = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+await token.approve(escrowAddress, milestoneAmount);
+
+// Then fund
+const txHash = await escrow.fund(0);
+```
+
+---
+
+### `markDelivered`
+
+```typescript
+markDelivered(milestoneId: number): Promise<string>
+```
+
+Marks a funded milestone as complete. **Payee only.** This starts the timelock window — if the payer does not approve or dispute within the configured duration, the payee can claim via `claimTimelockRelease`.
+
+<ParamField path="milestoneId" type="number" required>
+  Zero-based index of the milestone to mark as delivered.
+</ParamField>
+
+```typescript
+const txHash = await escrow.markDelivered(0);
+```
+
+---
+
+### `approveMilestone`
+
+```typescript
+approveMilestone(milestoneId: number): Promise<string>
+```
+
+Approves a delivered milestone and immediately releases the funds to the payee. **Payer only.**
+
+<ParamField path="milestoneId" type="number" required>
+  Zero-based index of the delivered milestone to approve.
+</ParamField>
+
+```typescript
+const txHash = await escrow.approveMilestone(0);
+```
+
+---
+
+### `raiseDispute`
+
+```typescript
+raiseDispute(milestoneId: number): Promise<string>
+```
+
+Freezes a delivered milestone and puts it into `DISPUTED` status pending arbiter review. Either the payer or the payee can raise a dispute.
+
+<ParamField path="milestoneId" type="number" required>
+  Zero-based index of the milestone to dispute.
+</ParamField>
+
+<Note>
+  Raising a dispute requires an arbiter address to have been set at deployment time (or via `setArbiter()`). If the arbiter is the zero address, there is no path to resolve a disputed milestone other than a `voteCancel()` by both parties.
+</Note>
+
+---
+
+### `resolveDispute`
+
+```typescript
+resolveDispute(milestoneId: number, releaseToPayee: boolean): Promise<string>
+```
+
+Resolves a disputed milestone. **Arbiter only.** The arbiter decides whether funds go to the payee or are refunded to the payer.
+
+<ParamField path="milestoneId" type="number" required>
+  Zero-based index of the disputed milestone.
+</ParamField>
+
+<ParamField path="releaseToPayee" type="boolean" required>
+  Pass `true` to release funds to the payee, or `false` to refund the payer.
+</ParamField>
+
+```typescript
+// Arbiter resolves in the payee's favour
+const txHash = await escrow.resolveDispute(1, true);
+```
+
+---
+
+### `claimTimelockRelease`
+
+```typescript
+claimTimelockRelease(milestoneId: number): Promise<string>
+```
+
+Releases funds to the payee once the timelock duration has elapsed after delivery, without requiring explicit payer approval. This protects the payee from a non-responsive payer after a successful delivery.
+
+<ParamField path="milestoneId" type="number" required>
+  Zero-based index of a delivered, non-disputed milestone.
+</ParamField>
+
+---
+
+### `voteCancel`
+
+```typescript
+voteCancel(): Promise<string>
+```
+
+Casts a vote to cancel the entire deal. Both the payer and the payee must call `voteCancel()` — the deal is not cancelled until both votes are recorded. Any remaining funded balance is refunded to the payer on cancellation.
+
+---
+
+## Admin Methods
+
+### `setArbiter`
+
+```typescript
+setArbiter(newArbiter: string): Promise<string>
+```
+
+Assigns or rotates the dispute arbiter. Requires `MANAGER_ROLE`.
+
+<ParamField path="newArbiter" type="string" required>
+  Address of the new arbiter. Pass the zero address to remove arbiter access.
+</ParamField>
+
+---
+
+### `setIdentityVerifier`
+
+```typescript
+setIdentityVerifier(verifierAddress: string): Promise<string>
+```
+
+Sets or replaces the KYC identity verifier used to gate participation. Requires `MANAGER_ROLE`. Pass the zero address to disable KYC gating.
+
+---
+
+### `pause`
+
+```typescript
+pause(): Promise<string>
+```
+
+Pauses all lifecycle transitions on the escrow. Requires admin role.
+
+---
+
+### `unpause`
+
+```typescript
+unpause(): Promise<string>
+```
+
+Resumes a paused escrow.
+
+---
+
+## Properties
+
+```typescript
+escrow.address  // The escrowAddress passed to the constructor
+```
+
+---
+
+## Full Lifecycle Example
+
+```typescript
+import {
+  TokenFactory,
+  EscrowManager,
+  MilestoneStatus,
+} from "@ankarachain/sdk";
+import { ethers } from "ethers";
+
+// ── 1. Deploy escrow ──────────────────────────────────────────────────────
+const factory = new TokenFactory({ network: "polygon-amoy", signer: payerSigner });
+
+const { escrowAddress } = await factory.deployEscrow({
+  payer:    payerAddress,
+  payee:    payeeAddress,
+  token:    usdcAddress,
+  milestones: [
+    { amount: ethers.parseUnits("5000", 6) },   // milestone 0
+    { amount: ethers.parseUnits("5000", 6) },   // milestone 1
+    { amount: ethers.parseUnits("10000", 6) },  // milestone 2
+  ],
+  arbiter: arbitratorAddress,
+});
+
+// ── 2. Payer: approve and fund milestone 0 ────────────────────────────────
+const usdc = new ethers.Contract(usdcAddress, ERC20_ABI, payerSigner);
+await usdc.approve(escrowAddress, ethers.parseUnits("5000", 6));
+
+const payerEscrow = new EscrowManager(factory.adapter, escrowAddress);
+await payerEscrow.fund(0);
+
+// ── 3. Payee: mark milestone 0 as delivered ───────────────────────────────
+const payeeFactory = new TokenFactory({ network: "polygon-amoy", signer: payeeSigner });
+const payeeEscrow  = new EscrowManager(payeeFactory.adapter, escrowAddress);
+await payeeEscrow.markDelivered(0);
+
+// ── 4. Payer: approve and release funds ───────────────────────────────────
+await payerEscrow.approveMilestone(0);
+
+// ── 5. Check remaining balance ────────────────────────────────────────────
+const remaining = await payerEscrow.remainingBalance();
+console.log("Remaining locked:", ethers.formatUnits(remaining, 6), "USDC");
+
+// ── 6. Review full activity log ───────────────────────────────────────────
+const activity = await payerEscrow.getActivity();
+console.log("Events:", activity.map(e => e.type));
+```
+
+---
+
+## Type Reference
+
+```typescript
+enum MilestoneStatus {
+  PENDING   = 0,
+  DELIVERED = 1,
+  DISPUTED  = 2,
+  RELEASED  = 3,
+  REFUNDED  = 4,
+}
+
+interface Milestone {
+  amount:          bigint;
+  descriptionHash: string;   // bytes32 hex
+  status:          MilestoneStatus;
+  deliveredAt:     bigint;   // unix seconds; 0 if not yet delivered
+  funded:          boolean;
+}
+
+interface EscrowMilestoneInput {
+  amount:           bigint;
+  descriptionHash?: string;  // defaults to zero hash if omitted
+}
+
+type EscrowActivityType =
+  | "funded" | "delivered" | "released"
+  | "disputed" | "resolved" | "refunded"
+  | "cancel-vote" | "cancelled" | "arbiter-changed";
+
+interface EscrowActivityEvent {
+  type:         EscrowActivityType;
+  milestoneId?: number;
+  txHash:       string;
+  timestamp:    number;
+  data?:        Record<string, unknown>;
+}
+
+interface DeployEscrowOptions {
+  payer:                    string;
+  payee:                    string;
+  token:                    string;
+  milestones:               EscrowMilestoneInput[];
+  arbiter?:                 string;
+  identityVerifier?:        string;
+  timelockDurationSeconds?: number;
+  admin?:                   string;
+}
+
+interface EscrowDeployResult {
+  escrowAddress: string;
+  txHash:        string;
+  payer:         string;
+  payee:         string;
+  token:         string;
+  totalAmount:   bigint;
+  network:       SupportedNetwork;
+  deployedAt:    number;
+}
+```

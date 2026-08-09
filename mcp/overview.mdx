@@ -1,0 +1,478 @@
+---
+title: "Ankara Chain MCP Server: AI-Assisted Token Deployment"
+sidebarTitle: "MCP Server"
+description: "The Ankara Chain MCP server lets Claude and other AI assistants deploy RWA tokens, manage escrow, and query on-chain state via natural language instructions."
+---
+
+The Model Context Protocol (MCP) is an open standard that lets AI assistants like Claude call external tools in a structured, type-safe way. The `@ankarachain/mcp` package implements an MCP server that exposes the entire Ankara Chain SDK — token deployment, escrow management, fiat ramp flows, and on-chain queries — as a set of callable tools. Once connected, you describe what you want in plain language and Claude handles the transaction construction, signing, and submission for you.
+
+## Installation
+
+<CodeGroup>
+
+```bash Global install
+npm install -g @ankarachain/mcp
+ankara-mcp
+```
+
+```bash Without installing
+npx ankara-mcp
+```
+
+</CodeGroup>
+
+## Connecting to Claude Desktop
+
+Add the following block to your `claude_desktop_config.json` file (usually found at `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "ankara-chain": {
+      "command": "npx",
+      "args": ["ankara-mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop after saving. You will see **ankara-chain** listed under active MCP servers in the Claude interface.
+
+<Warning>
+**Keep your `claude_desktop_config.json` private.** If you pass `privateKey` directly in tool calls (see below), those values appear in Claude's context window and in your conversation history. Use a dedicated deployer wallet with only the funds needed for gas — never a wallet that holds significant assets.
+</Warning>
+
+## Available Tools
+
+The MCP server exposes 24 tools, organised below by function. Every tool that submits a transaction requires `rpcUrl` and `privateKey` fields. Read-only tools require only `rpcUrl`.
+
+---
+
+### Token Deployment
+
+#### `deploy_token`
+
+Deploys an ERC-20 RWA token through your `TokenFactory` contract.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `template` | `string` | ✅ | One of: `farmland`, `commodity`, `real-estate`, `invoice`, `carbon-credit`, `mining-rights` |
+| `name` | `string` | ✅ | Token name |
+| `symbol` | `string` | ✅ | Token symbol, 3–5 characters |
+| `assetId` | `string` | ✅ | Unique asset identifier string |
+| `countryCode` | `string` | ✅ | ISO 3166-1 alpha-2, e.g. `"NG"` |
+| `factoryAddress` | `string` | ✅ | Your deployed `TokenFactory` contract address |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Deployer private key (0x-prefixed) |
+
+**Returns**: `{ contractAddress, txHash }`
+
+<Note>
+For full metadata prompts (area, soil type, valuation, etc.), use the interactive `ankara deploy` CLI command. The MCP `deploy_token` tool deploys with minimal placeholder metadata — update it on-chain afterwards.
+</Note>
+
+---
+
+#### `deploy_nft`
+
+Deploys an ERC-721 NFT asset record contract via the `NFTFactory`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `template` | `string` | ✅ | One of: `farmland-nft`, `real-estate-nft`, `mining-rights-nft`, `commodity-vault-nft` |
+| `name` | `string` | ✅ | Collection name |
+| `symbol` | `string` | ✅ | Collection symbol |
+| `assetId` | `string` | ✅ | Unique asset identifier string |
+| `countryCode` | `string` | ✅ | ISO 3166-1 alpha-2 |
+| `nftFactoryAddress` | `string` | ✅ | Your deployed `NFTFactory` address |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Deployer private key |
+
+**Returns**: `{ contractAddress, txHash }`
+
+---
+
+#### `deploy_batch_token`
+
+Deploys a `CommodityBatchToken` (ERC-1155) warehouse receipt contract.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | ✅ | Warehouse contract name |
+| `countryCode` | `string` | ✅ | ISO 3166-1 alpha-2 |
+| `baseURI` | `string` | ✅ | Base IPFS URI for token metadata |
+| `warehouseId` | `string` | ✅ | Unique warehouse facility identifier |
+| `warehouseLocation` | `string` | ✅ | Human-readable storage location |
+| `multiTokenFactoryAddress` | `string` | ✅ | Your deployed `MultiTokenFactory` address |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Deployer private key |
+
+**Returns**: `{ contractAddress, txHash }`
+
+---
+
+#### `deploy_pool_vault`
+
+Deploys a `PoolVault` — a multi-asset ERC-20 fund — via the `MultiTokenFactory`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | ✅ | ERC-20 name for vault shares |
+| `symbol` | `string` | ✅ | ERC-20 symbol for vault shares |
+| `assetId` | `string` | ✅ | Unique asset identifier string |
+| `countryCode` | `string` | ✅ | ISO 3166-1 alpha-2 |
+| `oracle` | `string` | — | Optional `ManualOracle` contract address |
+| `managementFeeBps` | `number` | — | Annual management fee in basis points (default `0`) |
+| `multiTokenFactoryAddress` | `string` | ✅ | Your deployed `MultiTokenFactory` address |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Deployer private key |
+
+**Returns**: `{ contractAddress, txHash }`
+
+---
+
+### Token Operations
+
+#### `mint_tokens`
+
+Mints ERC-20 RWA tokens to a recipient address.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `contractAddress` | `string` | ✅ | Token contract to mint on |
+| `to` | `string` | ✅ | Recipient wallet address |
+| `amount` | `string` | ✅ | Amount in whole units, e.g. `"100"` |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Deployer private key |
+
+**Returns**: `{ txHash, to, amount }`
+
+---
+
+#### `get_token_status`
+
+Reads the name, symbol, total supply, and lifecycle status of an Ankara Chain token. **Read-only.**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `contractAddress` | `string` | ✅ | Token contract address |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+
+**Returns**: `{ name, symbol, totalSupply, status, statusLabel }` where `statusLabel` is one of `DRAFT`, `ACTIVE`, `SUSPENDED`, `REDEEMED`, `EXPIRED`.
+
+---
+
+#### `set_asset_status`
+
+Sets the lifecycle status of an Ankara Chain token.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `contractAddress` | `string` | ✅ | Token contract address |
+| `status` | `number` | ✅ | `0`=DRAFT, `1`=ACTIVE, `2`=SUSPENDED, `3`=REDEEMED, `4`=EXPIRED |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Admin private key |
+
+**Returns**: `{ txHash, newStatus }`
+
+---
+
+#### `list_deployments`
+
+Lists all token contracts deployed by a given address through the `TokenFactory`. **Read-only.**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `factoryAddress` | `string` | ✅ | `TokenFactory` contract address |
+| `deployerAddress` | `string` | ✅ | The deployer wallet to look up |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+
+**Returns**: `{ deployer, tokens: string[], count }`
+
+---
+
+### Escrow
+
+#### `deploy_escrow`
+
+Deploys a `MilestoneEscrow` contract for tranche-based diaspora payments.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `payer` | `string` | ✅ | Address that funds the escrow |
+| `payee` | `string` | ✅ | Address that receives released funds |
+| `arbiter` | `string` | — | Optional dispute arbiter address |
+| `token` | `string` | ✅ | Stablecoin address (must be whitelisted on the `EscrowFactory`) |
+| `milestones` | `string[]` | ✅ | Ordered list of milestone amounts in whole token units, e.g. `["100", "200", "150"]` |
+| `timelockDurationSeconds` | `number` | — | Seconds before a delivered milestone can be force-released (default 7 days) |
+| `escrowFactoryAddress` | `string` | ✅ | Your deployed `EscrowFactory` address |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Deployer private key |
+
+**Returns**: `{ escrowAddress, txHash, totalAmount }`
+
+---
+
+#### `fund_escrow`
+
+Approves the ERC-20 allowance and deposits the full agreed amount into the escrow. Payer only.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `escrowAddress` | `string` | ✅ | Deployed `MilestoneEscrow` address |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Payer private key |
+
+**Returns**: `{ txHash, fundedAmount }`
+
+---
+
+#### `mark_milestone_delivered`
+
+Marks a milestone as delivered. Payee only.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `escrowAddress` | `string` | ✅ | Escrow contract address |
+| `milestoneId` | `number` | ✅ | 0-indexed milestone to mark delivered |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Payee private key |
+
+**Returns**: `{ txHash, milestoneId }`
+
+---
+
+#### `approve_milestone`
+
+Approves a delivered milestone and releases its funds to the payee. Payer only.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `escrowAddress` | `string` | ✅ | Escrow contract address |
+| `milestoneId` | `number` | ✅ | 0-indexed milestone to approve |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Payer private key |
+
+**Returns**: `{ txHash, milestoneId }`
+
+---
+
+#### `raise_dispute`
+
+Raises a dispute on a delivered milestone. Payer or payee only.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `escrowAddress` | `string` | ✅ | Escrow contract address |
+| `milestoneId` | `number` | ✅ | Milestone to dispute |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Caller private key |
+
+**Returns**: `{ txHash, milestoneId }`
+
+---
+
+#### `resolve_dispute`
+
+Resolves a disputed milestone. Arbiter only.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `escrowAddress` | `string` | ✅ | Escrow contract address |
+| `milestoneId` | `number` | ✅ | Milestone to resolve |
+| `releaseToPayee` | `boolean` | ✅ | `true` releases funds to payee; `false` refunds the payer |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Arbiter private key |
+
+**Returns**: `{ txHash, milestoneId, releaseToPayee }`
+
+---
+
+#### `claim_timelock_release`
+
+Force-releases a delivered milestone after the timelock has elapsed with no dispute. Callable by any address.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `escrowAddress` | `string` | ✅ | Escrow contract address |
+| `milestoneId` | `number` | ✅ | Milestone to release |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Caller private key |
+
+**Returns**: `{ txHash, milestoneId }`
+
+---
+
+#### `get_escrow_status`
+
+Reads the full state of an escrow — parties, balances, and per-milestone status. **Read-only.**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `escrowAddress` | `string` | ✅ | Escrow contract address |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+
+**Returns**: `{ payer, payee, arbiter, token, totalAmount, funded, cancelled, remainingBalance, milestones[] }`
+
+---
+
+### Fiat Ramp
+
+#### `deploy_ramp_settlement`
+
+Deploys a `RampSettlement` contract — the on-chain custody layer for fiat off-ramp flows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `treasury` | `string` | ✅ | Address that receives settled off-ramp deposits |
+| `rampSettlementFactoryAddress` | `string` | ✅ | Your deployed `RampSettlementFactory` address |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Deployer private key |
+
+**Returns**: `{ settlementAddress, txHash }`
+
+---
+
+#### `get_ramp_quote`
+
+Returns a fiat-to-token or token-to-fiat exchange quote via `ManualRampProvider`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `direction` | `string` | ✅ | `"on-ramp"` or `"off-ramp"` |
+| `fiatCurrency` | `string` | ✅ | e.g. `"NGN"`, `"KES"`, `"GHS"` |
+| `tokenSymbol` | `string` | ✅ | e.g. `"mUSD"` |
+| `countryCode` | `string` | ✅ | ISO 3166-1 alpha-2 |
+| `fiatAmount` | `string` | — | Provide one of `fiatAmount` or `tokenAmount` |
+| `tokenAmount` | `string` | — | Provide one of `fiatAmount` or `tokenAmount` |
+
+**Returns**: `{ direction, fiatAmount, fiatCurrency, tokenAmount, tokenSymbol, exchangeRate, feeFiat, expiresAt }`
+
+---
+
+#### `initiate_onramp`
+
+Starts an on-ramp session (fiat → tokens). Returns a session ID and payment URL. Does **not** mint tokens.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `fiatAmount` | `string` | ✅ | Amount of fiat to send |
+| `fiatCurrency` | `string` | ✅ | e.g. `"NGN"` |
+| `tokenSymbol` | `string` | ✅ | Token the user will receive |
+| `recipientAddress` | `string` | ✅ | Wallet that will receive the tokens |
+| `countryCode` | `string` | ✅ | ISO 3166-1 alpha-2 |
+
+**Returns**: `{ sessionId, status, paymentUrl }`
+
+---
+
+#### `record_onramp_settlement`
+
+Records an on-chain attestation that an on-ramp mint occurred. Call this after minting the recipient's tokens.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `settlementAddress` | `string` | ✅ | `RampSettlement` contract address |
+| `reference` | `string` | ✅ | Session ID or any consistent reference string |
+| `recipient` | `string` | ✅ | Wallet that received the tokens |
+| `token` | `string` | ✅ | Token contract address |
+| `amount` | `string` | ✅ | Amount minted, in whole units |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Caller private key |
+
+**Returns**: `{ txHash }`
+
+---
+
+#### `initiate_offramp`
+
+Deposits tokens into `RampSettlement` custody and starts a fiat payout session with the provider.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `settlementAddress` | `string` | ✅ | `RampSettlement` contract address |
+| `token` | `string` | ✅ | Token contract address to off-ramp |
+| `amount` | `string` | ✅ | Amount to deposit, in whole units |
+| `fiatCurrency` | `string` | ✅ | Fiat currency to receive |
+| `countryCode` | `string` | ✅ | ISO 3166-1 alpha-2 |
+| `accountNumber` | `string` | ✅ | Bank account or mobile money number |
+| `bankCode` | `string` | — | Leave blank for mobile money |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Depositor private key |
+
+**Returns**: `{ reference, txHash }`
+
+---
+
+#### `confirm_offramp_settlement`
+
+Confirms a fiat payout, releasing custodied tokens to the treasury. Requires `SETTLER_ROLE`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `settlementAddress` | `string` | ✅ | Settlement contract address |
+| `reference` | `string` | ✅ | Session reference from `initiate_offramp` |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Settler private key |
+
+**Returns**: `{ txHash }`
+
+---
+
+#### `refund_offramp`
+
+Refunds custodied tokens to the depositor when a fiat payout fails. Requires `MANAGER_ROLE`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `settlementAddress` | `string` | ✅ | Settlement contract address |
+| `reference` | `string` | ✅ | Session reference from `initiate_offramp` |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+| `privateKey` | `string` | ✅ | Manager private key |
+
+**Returns**: `{ txHash }`
+
+---
+
+#### `get_ramp_status`
+
+Reads the on-chain off-ramp deposit or on-ramp record for a given reference. **Read-only.**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `settlementAddress` | `string` | ✅ | Settlement contract address |
+| `reference` | `string` | ✅ | Session reference string |
+| `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
+
+**Returns**: `{ treasury, offRamp: { depositor, token, amount, status } | null, onRamp: { recipient, token, amount, status } | null }`
+
+---
+
+## Example: Deploying a Token with Claude
+
+With the MCP server connected, you can issue plain-language instructions in Claude and it will call the appropriate tools on your behalf.
+
+**You say to Claude:**
+
+> "Deploy a farmland RWA token called 'Volta Basin Farmland' with the symbol VBF on Polygon Amoy. Use asset ID FARMLAND-GH-001 and country code GH. The factory is at 0xA1b2C3..., the RPC is https://rpc-amoy.polygon.technology, and my private key is 0xMyDeployerKey."
+
+**Claude calls `deploy_token` and responds:**
+
+```json
+{
+  "contractAddress": "0xDeployedTokenAddress...",
+  "txHash": "0xTransactionHash..."
+}
+```
+
+**You then say:**
+
+> "Mint 10,000 VBF tokens to 0xRecipientAddress on the contract you just deployed."
+
+**Claude calls `mint_tokens` using the address from the previous response.**
+
+You can chain entire workflows — deploy an escrow, fund it, mark milestones delivered, and approve releases — all in a single conversation without leaving your IDE or touching the CLI.
+
+<Warning>
+Every tool call that requires `privateKey` sends that key through Claude's tool-use protocol. **Never use a wallet that holds significant funds.** Create a dedicated deployer wallet, fund it with just enough gas, and rotate it regularly. The private key you provide is used only for that specific tool call — it is not stored by the MCP server — but it does appear in Claude's context window for the duration of the conversation.
+</Warning>

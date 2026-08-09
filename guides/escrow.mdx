@@ -1,0 +1,294 @@
+---
+title: "Milestone Escrow for Tranche-Based Payments"
+sidebarTitle: "Escrow"
+description: "Deploy and manage milestone-based escrow contracts that release funds only when deliverables are confirmed — on both EVM chains and Stellar."
+---
+
+Milestone escrow lets two parties execute a multi-tranche deal without trusting each other upfront. The payer deposits stablecoin funds into a smart contract; those funds are locked until the payee marks each milestone delivered and the payer confirms the work. If something goes wrong, either party can raise a dispute and an optional arbiter steps in to resolve it — or, if no arbiter is set, a configurable timelock allows force-release after the dispute window expires. This makes escrow particularly useful for RWA deals involving construction draws, trade finance tranches, or multi-phase land development.
+
+---
+
+## How it works
+
+```
+Payer                     Contract                    Payee
+  │                           │                          │
+  │─── deployEscrow() ───────▶│                          │
+  │─── fund(milestoneId) ────▶│                          │
+  │                           │◀─── markDelivered() ─────│
+  │◀─── review deliverable ───│                          │
+  │─── approveMilestone() ───▶│─── release funds ───────▶│
+  │                           │                          │
+  │  (if dispute)             │                          │
+  │─── raiseDispute() ───────▶│◀───── raiseDispute() ────│
+  │                     Arbiter                          │
+  │                     resolveDispute(true/false)       │
+  │                           │─── release / refund ────▶│
+```
+
+Each milestone in the array is funded and settled independently — the payer can pay in installments rather than depositing the entire contract value up front.
+
+---
+
+## Deploy an escrow
+
+Call `TokenFactory.deployEscrow()` with a `DeployEscrowOptions` object. The `token` field must be a stablecoin address whitelisted on the `EscrowFactory` contract for your network.
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+import type { DeployEscrowOptions } from "@ankarachain/sdk";
+import { ethers } from "ethers";
+
+const factory = new TokenFactory({
+  network:               "polygon-amoy",
+  signer,
+  escrowFactoryAddress:  "0xEscrowFactoryAddress",
+});
+
+// Three-milestone construction draw
+const opts: DeployEscrowOptions = {
+  payer:   "0xPayerAddress",
+  payee:   "0xContractorAddress",
+  token:   "0xmUSDAddress",      // whitelisted stablecoin on the EscrowFactory
+
+  milestones: [
+    {
+      amount:          ethers.parseEther("30000"),  // 30 000 mUSD — foundation works
+      descriptionHash: ethers.id("Foundation complete"),
+    },
+    {
+      amount:          ethers.parseEther("40000"),  // 40 000 mUSD — roofing
+      descriptionHash: ethers.id("Roofing complete"),
+    },
+    {
+      amount:          ethers.parseEther("30000"),  // 30 000 mUSD — finishing
+      descriptionHash: ethers.id("Finishing complete"),
+    },
+  ],
+
+  arbiter:                  "0xArbiterAddress",   // optional — omit for timelock-only
+  timelockDurationSeconds:  60 * 60 * 24 * 7,    // 7 days (also the on-chain default)
+  admin:                    "0xAdminAddress",     // defaults to the connected signer
+};
+
+const result = await factory.deployEscrow(opts);
+
+console.log("Escrow address:", result.escrowAddress);
+console.log("Tx hash:       ", result.txHash);
+console.log("Total locked:  ", ethers.formatEther(result.totalAmount), "mUSD");
+```
+
+`deployEscrow()` returns an `EscrowDeployResult`:
+
+```typescript
+interface EscrowDeployResult {
+  escrowAddress: string;
+  txHash:        string;
+  payer:         string;
+  payee:         string;
+  token:         string;
+  totalAmount:   bigint;   // sum of all milestone amounts
+  network:       SupportedNetwork;
+  deployedAt:    number;
+}
+```
+
+<Note>
+  The `descriptionHash` field is a `bytes32` on-chain. Use `ethers.id()` to hash a human-readable string, or pass `ethers.ZeroHash` if you're tracking descriptions off-chain.
+</Note>
+
+---
+
+## EscrowManager operations
+
+Instantiate `EscrowManager` with the adapter from your `TokenFactory` and the `escrowAddress` from the deploy result. All write methods return the transaction hash as a string.
+
+```typescript
+import { EscrowManager } from "@ankarachain/sdk";
+
+const escrow = new EscrowManager(factory.adapter, result.escrowAddress);
+```
+
+### Fund a milestone
+
+The payer deposits tokens for a single milestone. On EVM, approve the escrow contract to spend the milestone amount before calling `fund()`:
+
+```typescript
+// EVM: approve the escrow to spend milestone 0's amount first
+const token = new ethers.Contract(mUSDAddress, erc20Abi, signer);
+await token.approve(result.escrowAddress, ethers.parseEther("30000"));
+
+// Fund milestone 0
+const txHash = await escrow.fund(0);
+console.log("Funded milestone 0:", txHash);
+```
+
+On Stellar, the nested token transfer is authorized within the same Soroban invocation — no separate approval step is needed.
+
+### Mark a milestone delivered
+
+The payee calls this when the work for a milestone is complete:
+
+```typescript
+// Called by the payee's signer
+const txHash = await escrow.markDelivered(0);
+console.log("Milestone 0 marked delivered:", txHash);
+```
+
+### Approve a milestone
+
+The payer reviews the deliverable and releases the funds to the payee:
+
+```typescript
+// Called by the payer's signer
+const txHash = await escrow.approveMilestone(0);
+console.log("Milestone 0 approved, funds released:", txHash);
+```
+
+### Raise a dispute
+
+Either the payer or payee can freeze a delivered milestone pending arbiter review:
+
+```typescript
+const txHash = await escrow.raiseDispute(0);
+console.log("Dispute raised on milestone 0:", txHash);
+```
+
+### Resolve a dispute
+
+The arbiter resolves the frozen milestone. Pass `true` to release to the payee, or `false` to refund the payer:
+
+```typescript
+// Called by the arbiter's signer
+const txHash = await escrow.resolveDispute(
+  0,      // milestoneId
+  true    // true = release to payee; false = refund to payer
+);
+console.log("Dispute resolved:", txHash);
+```
+
+### Claim a timelock release
+
+If no arbiter is set (or the arbiter is unresponsive), the payee can force-release a delivered, non-disputed milestone once the timelock window has elapsed:
+
+```typescript
+const txHash = await escrow.claimTimelockRelease(0);
+```
+
+### Read activity history
+
+`getActivity()` returns the full lifecycle event log for this escrow, sorted oldest-first:
+
+```typescript
+import type { EscrowActivityEvent } from "@ankarachain/sdk";
+
+const events: EscrowActivityEvent[] = await escrow.getActivity();
+
+for (const event of events) {
+  console.log(
+    event.type,                               // "funded" | "delivered" | "released" | ...
+    event.milestoneId !== undefined
+      ? `(milestone ${event.milestoneId})`
+      : "(deal-level)",
+    new Date(event.timestamp * 1000).toISOString()
+  );
+}
+```
+
+Each `EscrowActivityEvent` has the shape:
+
+```typescript
+interface EscrowActivityEvent {
+  type:         EscrowActivityType;  // "funded" | "delivered" | "released" | "disputed" | "resolved" | "refunded" | "cancel-vote" | "cancelled" | "arbiter-changed"
+  milestoneId?: number;              // present for milestone-scoped events
+  txHash:       string;
+  timestamp:    number;              // Unix seconds
+  data?:        Record<string, unknown>;
+}
+```
+
+### Read milestone state
+
+```typescript
+import { MilestoneStatus } from "@ankarachain/sdk";
+
+const milestone = await escrow.getMilestone(0);
+
+console.log("Amount:     ", ethers.formatEther(milestone.amount), "mUSD");
+console.log("Status:     ", MilestoneStatus[milestone.status]);
+  // "PENDING" | "DELIVERED" | "DISPUTED" | "RELEASED" | "REFUNDED"
+console.log("Funded:     ", milestone.funded);
+console.log("Delivered at:", milestone.deliveredAt.toString());
+
+// Or fetch all milestones at once:
+const all = await escrow.getAllMilestones();
+```
+
+### Cancel a deal
+
+Both parties must call `voteCancel()` for the deal to be cancelled — a single vote is not enough:
+
+```typescript
+// Payer votes to cancel
+await escrow.voteCancel(); // called with payer's signer
+
+// Payee also votes to cancel
+await escrow.voteCancel(); // called with payee's signer
+// — deal is now cancelled; any unfunded milestones are closed
+```
+
+---
+
+## CLI escrow commands
+
+The Ankara Chain CLI provides commands for every escrow lifecycle action. All commands read the network and signer from `ankara.config.json`.
+
+```bash
+# Deploy a new escrow (interactive prompts for payer, payee, milestones, etc.)
+ankara deploy-escrow
+
+# Fund a milestone
+ankara escrow-fund --escrow 0xEscrowAddress --milestone 0
+
+# Mark a milestone delivered (payee)
+ankara escrow-deliver --escrow 0xEscrowAddress --milestone 0
+
+# Approve a delivered milestone (payer)
+ankara escrow-approve --escrow 0xEscrowAddress --milestone 0
+
+# Raise a dispute
+ankara escrow-dispute --escrow 0xEscrowAddress --milestone 0
+
+# Resolve a dispute (arbiter)
+ankara escrow-resolve --escrow 0xEscrowAddress --milestone 0 --release-to-payee true
+```
+
+---
+
+## Stellar
+
+On Stellar, pass a `StellarAdapter` (from a `TokenFactory` configured with `network: "stellar-testnet"`) to `EscrowManager`. The API is identical — same methods, same parameter types. The testnet `EscrowFactory` contract ID is:
+
+```
+CDF5P3KOAU6RZGUSSA7KPNYEJMCBYAF5TVWELNFSVTM3TYP6EFUXRYVW
+```
+
+```typescript
+const factory = new TokenFactory({
+  network:              "stellar-testnet",
+  stellarSecretKey:     process.env.STELLAR_SECRET_KEY!,
+  escrowFactoryAddress: "CDF5P3KOAU6RZGUSSA7KPNYEJMCBYAF5TVWELNFSVTM3TYP6EFUXRYVW",
+});
+
+const result = await factory.deployEscrow({
+  payer:      "GPAYERSTELLARADDRESS",
+  payee:      "GPAYEESTELLARADDRESS",
+  token:      "CSTABLECOINCONTRACTID",
+  milestones: [
+    { amount: BigInt("30000000000000000000000") },   // 30 000 tokens in stroop-equivalent
+    { amount: BigInt("70000000000000000000000") },
+  ],
+});
+
+const escrow = new EscrowManager(factory.adapter, result.escrowAddress);
+```

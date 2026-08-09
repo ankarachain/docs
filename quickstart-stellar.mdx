@@ -1,0 +1,283 @@
+---
+title: "Deploy Your First RWA Token on Stellar"
+sidebarTitle: "Stellar Quickstart"
+description: "Learn how to deploy a tokenized real-world asset on Stellar testnet using Soroban contracts and the Ankara Chain TypeScript SDK."
+---
+
+This guide walks you through deploying a tokenized RWA on Stellar Testnet using Soroban smart contracts and the Ankara Chain SDK. The Stellar path uses the same `TokenFactory` API as the EVM quickstart — only the config changes. By the end you will have a deployed Soroban token contract, minted fractional shares to a testnet account, and a working milestone escrow deal demonstrating Stellar's on-chain payment primitive.
+
+## Prerequisites
+
+- **Node.js 18+** installed locally
+- **A Stellar testnet account** with a secret key starting with `S...`
+- **Testnet XLM** to pay Soroban transaction fees — get free XLM from the [Stellar Friendbot](https://friendbot.stellar.org)
+
+<Warning>
+  Never commit your Stellar secret key to version control. Keep `STELLAR_SECRET_KEY` in `.env` only. In browser-based applications, use a Freighter wallet integration via `stellarSigner` instead of passing the raw secret key through your application code.
+</Warning>
+
+---
+
+<Steps>
+  <Step title="Install the SDK">
+    Install the Ankara Chain TypeScript SDK:
+
+    ```bash
+    npm install @ankarachain/sdk
+    ```
+
+    You can also run CLI commands without a global install using `npx`:
+
+    ```bash
+    npx ankara <command>
+    ```
+
+    <Note>
+      The Stellar adapter bundles `@stellar/stellar-sdk` as a dependency. You do not need to install it separately — the SDK manages the Soroban RPC client and contract bindings internally.
+    </Note>
+  </Step>
+
+  <Step title="Initialize your project">
+    Run the `ankara init` wizard and select **Stellar Testnet (Soroban)** when prompted for a network:
+
+    ```bash
+    npx ankara init my-stellar-rwa-project
+    ```
+
+    After the wizard completes, your project directory contains:
+
+    ```
+    my-stellar-rwa-project/
+    ├── ankara.config.json
+    └── .env
+    ```
+
+    Your `.env` file will include:
+
+    ```bash
+    STELLAR_SECRET_KEY=your_stellar_secret_seed_here
+    ```
+
+    Replace `your_stellar_secret_seed_here` with your actual Stellar testnet secret key (the one starting with `S`). The config file starts with just the network set:
+
+    ```json
+    {
+      "version": "1.0",
+      "network": "stellar-testnet",
+      "deployments": []
+    }
+    ```
+  </Step>
+
+  <Step title="Set the Token Factory address">
+    Unlike the EVM flow, you do not need to deploy your own factory contract for testnet — a shared factory is already deployed on Stellar Testnet. Set the factory address in `ankara.config.json` to use it immediately.
+
+    Update your config to match the live testnet deployments:
+
+    ```json
+    {
+      "version": "1.0",
+      "network": "stellar-testnet",
+      "factoryAddress":       "CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF",
+      "escrowFactoryAddress": "CDF5P3KOAU6RZGUSSA7KPNYEJMCBYAF5TVWELNFSVTM3TYP6EFUXRYVW",
+      "deployments": []
+    }
+    ```
+
+    The full set of live Stellar Testnet contract addresses is:
+
+    | Contract | Address |
+    |----------|---------|
+    | Token Factory | `CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF` |
+    | NFT Factory | `CDAMIGCFMFM7O6Q6GYRZKOTZ67L74KGHMSW3IXEZNWWS3JLGHUSSLZC4` |
+    | Multi-Token Factory | `CDT6IV4LVZCG55Z7AWLEROBGKYZKIFNGG2FEGNAYQKC735LDI5TSKVVM` |
+    | Escrow Factory | `CDF5P3KOAU6RZGUSSA7KPNYEJMCBYAF5TVWELNFSVTM3TYP6EFUXRYVW` |
+    | Ramp Settlement Factory | `CCLEC6AKC65VOIL6KMG52YR2Y2K4WHFMY62GX34NOXBKQZY4QJAIFUWC` |
+    | Manual Oracle | `CD3I6U4XHTCCSPHAVR44SD3I2D3MATSMNVBORGWXYL6FMQJPDUOSRS56` |
+    | Collateral Vault | `CDIUS3CGVFJONWUK3SCK4RFFONENSJ6QRZLNOHHO7EMVPZCCQ3IUSVNB` |
+
+    <Note>
+      If you need isolated factory contracts under your own deployer key — for example, to run a whitelisted identity verifier that only your app controls — you can deploy your own factories by running `./scripts/deploy-testnet.sh deployer` from `packages/contracts-stellar`. See [Stellar Contracts](/contracts/stellar) for instructions.
+    </Note>
+  </Step>
+
+  <Step title="Deploy a token">
+    Deploy a token using the same `ankara deploy` flow as EVM networks:
+
+    ```bash
+    npx ankara deploy --template farmland
+    ```
+
+    The interactive wizard prompts for asset metadata:
+
+    ```
+    ? Token name:      › Kano Farmland Token
+    ? Token symbol:    › KFT
+    ? Asset ID:        › KANO-FARM-001
+    ? Country code:    › NG
+    ? GPS location:    › 12.0022, 8.5919
+    ? Area (sq m):     › 10000
+    ? Soil type:       › loam
+    ? Irrigation:      › rain-fed
+    ? Crop history:    › maize,sorghum,fallow
+    ? Valuation USD:   › 50000
+    ? State/region:    › Kano State
+    ...
+    ✓ FarmlandToken deployed: CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+    ✓ Saved to ankara.config.json
+    ```
+
+    The deployed contract ID (a Soroban `C...` address) is saved to `ankara.config.json` alongside your factory address. All six asset templates — Farmland, Commodity, Real Estate, Invoice, Carbon Credit, and Mining Rights — are available on Stellar with full feature parity with EVM.
+  </Step>
+
+  <Step title="Mint tokens">
+    Mint fractional token shares to a Stellar testnet account:
+
+    ```bash
+    npx ankara mint
+    ```
+
+    The CLI reads your deployed token from `ankara.config.json`, prompts for a recipient Stellar address (a `G...` public key), and the amount to mint. The Soroban token contract conforms to the SEP-41 fungible token interface, so any Stellar wallet or exchange that supports SEP-41 can hold and transfer the issued shares.
+  </Step>
+
+  <Step title="Create a Milestone Escrow deal">
+    The Ankara Chain `MilestoneEscrow` contract lets you structure payment deals tied to on-chain delivery confirmations — useful for tranche-based land purchase agreements, invoice financing draws, or commodity release schedules.
+
+    Deploy an escrow contract using the CLI:
+
+    ```bash
+    npx ankara deploy-escrow
+    ```
+
+    The wizard prompts for payer, payee, token, and milestone amounts. For testnet demos, you can use the native XLM Stellar Asset Contract as the escrow token:
+
+    ```
+    CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
+    ```
+
+    <Warning>
+      XLM is a volatile native asset, not a stablecoin. Use it only for testnet demos. For production escrow flows, use a stablecoin like USDC that is whitelisted on your `EscrowFactory`.
+    </Warning>
+
+    The deployed escrow contract ID is saved to `ankara.config.json` under `deployments`. The payer can then fund individual milestones, the payee marks them as delivered, and the arbiter (if set) resolves disputes — all on-chain via Soroban invocations.
+  </Step>
+</Steps>
+
+---
+
+## Using the SDK Directly
+
+For programmatic use in your application — server-side scripts, backend APIs, or build pipelines — pass your Stellar secret key directly to `TokenFactory`. The adapter handles the Soroban RPC client, transaction signing, and result normalization:
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+
+const factory = new TokenFactory({
+  network:          "stellar-testnet",
+  stellarSecretKey: process.env.STELLAR_SECRET_KEY!,
+  factoryAddress:   "CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF",
+});
+
+const result = await factory.deployFarmland({
+  name:        "Kano Farmland Token",
+  symbol:      "KFT",
+  assetId:     "KANO-FARM-001",
+  countryCode: "NG",
+  metadata: {
+    location:          "12.0022, 8.5919",
+    areaSqMeters:      BigInt(10000),
+    soilType:          "loam",
+    irrigationType:    "rain-fed",
+    cropHistory:       "maize,sorghum,fallow",
+    titleDocumentHash: "0x0000000000000000000000000000000000000000000000000000000000000000",
+    valuationUSD:      BigInt("50000000000000000000000"),
+    stateRegion:       "Kano State",
+    lastUpdated:       BigInt(Math.floor(Date.now() / 1000)),
+  },
+});
+
+console.log("Deployed:", result.tokenAddress);
+// → CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+The returned `DeployResult` has the same shape as on EVM chains:
+
+```typescript
+interface DeployResult {
+  tokenAddress: string;       // Soroban contract ID (C...)
+  txHash:       string;       // Stellar transaction hash
+  assetId:      string;
+  template:     AssetTemplate;
+  network:      SupportedNetwork; // "stellar-testnet"
+  deployedAt:   number;       // unix timestamp
+}
+```
+
+### Browser / Freighter integration
+
+In browser-based applications, you should never expose the Stellar secret key. Instead, pass a `stellarSigner` — an object matching the Freighter wallet API shape — to avoid the raw seed ever touching application code:
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+import freighter from "@stellar/freighter-api";
+
+const factory = new TokenFactory({
+  network: "stellar-testnet",
+  stellarSigner: {
+    publicKey:        await freighter.getPublicKey(),
+    signTransaction:  freighter.signTransaction,
+    signAuthEntry:    freighter.signAuthEntry,
+  },
+  factoryAddress: "CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF",
+});
+```
+
+`stellarSigner` and `stellarSecretKey` are mutually exclusive. If both are set, `stellarSecretKey` takes precedence — so never set both in the same config object.
+
+### Deploying a Milestone Escrow programmatically
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+import { ethers } from "ethers";
+
+const factory = new TokenFactory({
+  network:             "stellar-testnet",
+  stellarSecretKey:    process.env.STELLAR_SECRET_KEY!,
+  factoryAddress:      "CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF",
+  escrowFactoryAddress:"CDF5P3KOAU6RZGUSSA7KPNYEJMCBYAF5TVWELNFSVTM3TYP6EFUXRYVW",
+});
+
+const escrow = await factory.deployEscrow({
+  payer:  "GPAYER_ADDRESS_HERE",
+  payee:  "GPAYEE_ADDRESS_HERE",
+  token:  "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC", // XLM SAC (testnet demo only)
+  milestones: [
+    { amount: BigInt("10000000000000000000"), descriptionHash: ethers.ZeroHash },
+    { amount: BigInt("20000000000000000000"), descriptionHash: ethers.ZeroHash },
+    { amount: BigInt("20000000000000000000"), descriptionHash: ethers.ZeroHash },
+  ],
+  timelockDurationSeconds: 7 * 24 * 60 * 60, // 7 days
+});
+
+console.log("Escrow deployed:", escrow.escrowAddress);
+console.log("Total deal value:", escrow.totalAmount.toString());
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Stellar Contracts" icon="star" href="/contracts/stellar">
+    How Soroban contracts map to the same SDK API as EVM networks, and what Stellar-specific features are available.
+  </Card>
+  <Card title="EVM Quickstart" icon="rocket" href="/quickstart">
+    Deploy the same token on Polygon Amoy if you want to compare the EVM and Stellar flows side by side.
+  </Card>
+  <Card title="CLI Commands" icon="terminal" href="/cli/commands">
+    Full reference for every `ankara` command and flag, including Stellar-specific options.
+  </Card>
+  <Card title="Escrow Contracts" icon="handshake" href="/contracts/escrow">
+    Milestone-based escrow architecture, dispute resolution, and arbiter roles.
+  </Card>
+</CardGroup>

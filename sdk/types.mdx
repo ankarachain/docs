@@ -1,0 +1,696 @@
+---
+title: "TypeScript Types and Interfaces for Ankara Chain SDK"
+sidebarTitle: "Types"
+description: "Complete reference for all exported TypeScript types, interfaces, and enums in @ankarachain/sdk — configs, metadata, deploy options, and result shapes."
+---
+
+The `@ankarachain/sdk` package is fully typed. Every class method, factory function, and utility accepts and returns named TypeScript types — no `any`, no guesswork. This page is the authoritative reference for every exported type, interface, and enum. Import them directly from the package root:
+
+```typescript
+import type {
+  AnkaraChainConfig,
+  DeployFarmlandOptions,
+  DeployResult,
+  AssetTemplate,
+} from "@ankarachain/sdk";
+import { AssetStatus, MilestoneStatus } from "@ankarachain/sdk";
+```
+
+---
+
+## Config Types
+
+These types control how the SDK connects to a network and locates factory contracts. You pass one of these to every top-level SDK class (`TokenFactory`, `AssetRegistry`, `EscrowManager`, etc.).
+
+### `AnkaraChainConfig`
+
+A discriminated union narrowed by the `network` field. When `network` is an `EVMSupportedNetwork` the SDK constructs an `EVMAdapter`; when it is a `StellarSupportedNetwork` it constructs a `StellarAdapter`.
+
+```typescript
+export type AnkaraChainConfig = EVMAnkaraChainConfig | StellarAnkaraChainConfig;
+```
+
+### `EVMAnkaraChainConfig`
+
+```typescript
+export interface EVMAnkaraChainConfig {
+  network: EVMSupportedNetwork;
+  signer?: Signer;                          // ethers.js v6 Signer
+  provider?: Provider;                      // ethers.js v6 Provider
+  factoryAddress?: string;                  // Override default ERC-20 factory address
+  nftFactoryAddress?: string;               // Override default NFT factory address
+  multiTokenFactoryAddress?: string;        // Override default ERC-1155 factory address
+  escrowFactoryAddress?: string;            // Override default EscrowFactory address
+  rampSettlementFactoryAddress?: string;    // Override default RampSettlementFactory address
+  rpcUrl?: string;                          // Override default RPC
+}
+```
+
+### `StellarAnkaraChainConfig`
+
+```typescript
+export interface StellarAnkaraChainConfig {
+  network: StellarSupportedNetwork;
+  /** Stellar secret seed (starts with "S..."). Server-side/CLI use only. */
+  stellarSecretKey?: string;
+  /** External wallet signer (e.g. Freighter). Mutually exclusive with stellarSecretKey. */
+  stellarSigner?: StellarExternalSigner;
+  factoryAddress?: string;              // Soroban contract ID (starts with "C...")
+  nftFactoryAddress?: string;
+  multiTokenFactoryAddress?: string;
+  escrowFactoryAddress?: string;
+  rampSettlementFactoryAddress?: string;
+  rpcUrl?: string;                      // Override default Soroban RPC endpoint
+}
+```
+
+<Warning>
+  Never set `stellarSecretKey` in a browser application. Use `stellarSigner` with Freighter or another SEP-43-compatible wallet instead — the raw secret seed never has to touch your frontend code.
+</Warning>
+
+### `StellarExternalSigner`
+
+Matches the Freighter wallet API shape exactly. Any SEP-43-compatible wallet can be passed straight through.
+
+```typescript
+export interface StellarExternalSigner {
+  publicKey: string;
+  signTransaction: SignTransaction;   // from @stellar/stellar-sdk/contract
+  signAuthEntry?: SignAuthEntry;
+}
+```
+
+---
+
+## Network Types
+
+### `SupportedNetwork`
+
+```typescript
+export type EVMSupportedNetwork =
+  | "polygon"
+  | "polygon-amoy"
+  | "ethereum"
+  | "bnb"
+  | "celo"
+  | "localhost";
+
+export type StellarSupportedNetwork = "stellar" | "stellar-testnet";
+
+export type SupportedNetwork = EVMSupportedNetwork | StellarSupportedNetwork;
+```
+
+### `EVMNetworkConfig`
+
+Returned by `getNetwork()` when you pass an `EVMSupportedNetwork`.
+
+```typescript
+export interface EVMNetworkConfig {
+  chainFamily: "evm";
+  chainId: number;
+  name: string;
+  rpcUrl: string;
+  explorerUrl: string;
+  nativeCurrency: { name: string; symbol: string; decimals: number };
+}
+```
+
+### `StellarNetworkConfig`
+
+Returned by `getNetwork()` when you pass a `StellarSupportedNetwork`.
+
+```typescript
+export interface StellarNetworkConfig {
+  chainFamily: "stellar";
+  /** Stellar network passphrase — identifies which network a signed transaction targets. */
+  networkPassphrase: string;
+  name: string;
+  /** Soroban RPC endpoint (not a Horizon URL). */
+  rpcUrl: string;
+  explorerUrl: string;
+  nativeCurrency: { name: string; symbol: string; decimals: number };
+}
+```
+
+### `NetworkConfig`
+
+```typescript
+export type NetworkConfig = EVMNetworkConfig | StellarNetworkConfig;
+```
+
+---
+
+## Asset Enums
+
+### `AssetTemplate`
+
+The six ERC-20 / SEP-41 asset classes supported by `TokenFactory`.
+
+```typescript
+export type AssetTemplate =
+  | "farmland"
+  | "commodity"
+  | "real-estate"
+  | "invoice"
+  | "carbon-credit"
+  | "mining-rights";
+```
+
+### `NFTAssetTemplate`
+
+The four NFT (ERC-721 / Soroban NFT) asset classes supported by `NFTFactory`.
+
+```typescript
+export type NFTAssetTemplate =
+  | "farmland-nft"
+  | "real-estate-nft"
+  | "mining-rights-nft"
+  | "commodity-vault-nft";
+```
+
+### `MultiTokenTemplate`
+
+The two ERC-1155 / multi-token asset classes supported by `MultiTokenFactory`.
+
+```typescript
+export type MultiTokenTemplate = "commodity-batch" | "pool-vault";
+```
+
+### `AssetStatus`
+
+On-chain lifecycle state stored in every deployed token. Managed via `AssetRegistry.setStatus()`.
+
+```typescript
+export enum AssetStatus {
+  DRAFT     = 0,
+  ACTIVE    = 1,
+  SUSPENDED = 2,
+  REDEEMED  = 3,
+  EXPIRED   = 4,
+}
+```
+
+<Tip>
+  Tokens are deployed in `DRAFT` state. Call `AssetRegistry.setStatus(address, AssetStatus.ACTIVE)` before opening transfers to investors.
+</Tip>
+
+---
+
+## Metadata Types
+
+Each asset template has a dedicated metadata interface that mirrors the corresponding on-chain struct. All `bigint` fields are in wei (1e18 = 1 unit) unless noted otherwise. All `bytes32` fields are hex strings (`0x`-prefixed, 32 bytes).
+
+### `FarmlandMetadata`
+
+```typescript
+export interface FarmlandMetadata {
+  location: string;
+  areaSqMeters: bigint;
+  soilType: string;
+  irrigationType: string;
+  cropHistory: string;
+  titleDocumentHash: string;   // bytes32 hex
+  valuationUSD: bigint;        // in wei
+  stateRegion: string;
+  lastUpdated: bigint;         // unix seconds
+}
+```
+
+### `CommodityMetadata`
+
+```typescript
+export interface CommodityMetadata {
+  commodityType: string;
+  quantityKg: bigint;
+  gradeClassification: string;
+  warehouseId: string;
+  warehouseLocation: string;
+  depositDate: bigint;
+  expiryDate: bigint;
+  inspectionReportHash: string;  // bytes32 hex
+  valuationUSD: bigint;
+  harvestSeason: string;
+  lastUpdated: bigint;
+}
+```
+
+### `RealEstateMetadata`
+
+```typescript
+export interface RealEstateMetadata {
+  propertyId: string;
+  propertyType: string;       // "Residential" | "Commercial" | "Industrial" | "Land"
+  locationAddress: string;
+  totalAreaSqMeters: bigint;
+  titleDocumentHash: string;  // bytes32 hex
+  valuationUSD: bigint;
+  rentalYieldBps: bigint;     // e.g. 600 = 6% annual yield
+  occupancyStatus: string;    // "Vacant" | "Owner-occupied" | "Tenanted"
+  developerAddress: string;
+  lastUpdated: bigint;
+}
+```
+
+### `InvoiceMetadata`
+
+```typescript
+export interface InvoiceMetadata {
+  invoiceNumber: string;
+  debtorReference: string;
+  faceValueUSD: bigint;
+  discountRateBps: bigint;
+  issuanceDate: bigint;
+  dueDate: bigint;
+  invoiceDocumentHash: string;  // bytes32 hex
+  currency: string;             // ISO 4217 e.g. "NGN", "GHS", "KES", "USD"
+  lastUpdated: bigint;
+}
+```
+
+### `CarbonCreditMetadata`
+
+```typescript
+export interface CarbonCreditMetadata {
+  creditType: string;          // "REDD+" | "VCS" | "Gold Standard" | "GS4GG" | "CDM"
+  verificationBodyRef: string;
+  vintageYear: bigint;
+  quantityCO2e: bigint;        // in wei (1e18 = 1 tCO2e)
+  projectLocation: string;
+  projectType: string;         // "Forestry" | "Agriculture" | "Energy" | "Waste"
+  verificationDocHash: string; // bytes32 hex
+  lastUpdated: bigint;
+}
+```
+
+### `MiningRightsMetadata`
+
+```typescript
+export interface MiningRightsMetadata {
+  licenseNumber: string;
+  mineralType: string;         // "Gold" | "Coltan" | "Copper" | "Diamond" | "Coal" | "Lithium"
+  concessionArea: string;
+  areaHectares: bigint;
+  licenseExpiry: bigint;       // unix seconds
+  issuingAuthority: string;
+  licenseDocumentHash: string; // bytes32 hex
+  royaltyRateBps: bigint;      // e.g. 250 = 2.5%
+  lastUpdated: bigint;
+}
+```
+
+---
+
+## Deploy Options
+
+All deploy-options types extend `BaseDeployOptions` with a mandatory `metadata` field typed to the corresponding metadata interface.
+
+### `BaseDeployOptions`
+
+```typescript
+export interface BaseDeployOptions {
+  name: string;              // Token name, e.g. "Kaduna Farmland Token"
+  symbol: string;            // Token symbol, e.g. "KFT"
+  assetId: string;           // Your unique asset identifier (bytes32 hex)
+  countryCode: string;       // ISO 3166-1 alpha-2, e.g. "NG"
+  admin?: string;            // Admin address; defaults to the connected signer
+  identityVerifier?: string; // Optional IIdentityVerifier contract address
+}
+```
+
+### Template-specific deploy options
+
+<AccordionGroup>
+  <Accordion title="DeployFarmlandOptions">
+    ```typescript
+    export interface DeployFarmlandOptions extends BaseDeployOptions {
+      metadata: FarmlandMetadata;
+    }
+    ```
+  </Accordion>
+  <Accordion title="DeployCommodityOptions">
+    ```typescript
+    export interface DeployCommodityOptions extends BaseDeployOptions {
+      metadata: CommodityMetadata;
+    }
+    ```
+  </Accordion>
+  <Accordion title="DeployRealEstateOptions">
+    ```typescript
+    export interface DeployRealEstateOptions extends BaseDeployOptions {
+      metadata: RealEstateMetadata;
+    }
+    ```
+  </Accordion>
+  <Accordion title="DeployInvoiceOptions">
+    ```typescript
+    export interface DeployInvoiceOptions extends BaseDeployOptions {
+      metadata: InvoiceMetadata;
+    }
+    ```
+  </Accordion>
+  <Accordion title="DeployCarbonCreditOptions">
+    ```typescript
+    export interface DeployCarbonCreditOptions extends BaseDeployOptions {
+      metadata: CarbonCreditMetadata;
+    }
+    ```
+  </Accordion>
+  <Accordion title="DeployMiningRightsOptions">
+    ```typescript
+    export interface DeployMiningRightsOptions extends BaseDeployOptions {
+      metadata: MiningRightsMetadata;
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Deploy Results
+
+### `DeployResult`
+
+Returned by all six `TokenFactory.deploy*()` methods.
+
+```typescript
+export interface DeployResult {
+  tokenAddress: string;
+  txHash: string;
+  assetId: string;
+  template: AssetTemplate;
+  network: SupportedNetwork;
+  deployedAt: number;  // unix seconds
+}
+```
+
+### `NFTDeployResult`
+
+Returned by `NFTFactory.deploy*NFT()` methods.
+
+```typescript
+export interface NFTDeployResult {
+  nftAddress: string;
+  txHash: string;
+  assetId: string;
+  template: NFTAssetTemplate;
+  network: SupportedNetwork;
+  deployedAt: number;
+}
+```
+
+### `MultiTokenDeployResult`
+
+Returned by `MultiTokenFactory.deployCommodityBatch()` and `deployPoolVault()`.
+
+```typescript
+export interface MultiTokenDeployResult {
+  contractAddress: string;
+  txHash: string;
+  template: MultiTokenTemplate;
+  network: SupportedNetwork;
+  deployedAt: number;
+}
+```
+
+### `EscrowDeployResult`
+
+Returned by `EscrowManager.deployEscrow()`.
+
+```typescript
+export interface EscrowDeployResult {
+  escrowAddress: string;
+  txHash: string;
+  payer: string;
+  payee: string;
+  token: string;       // stablecoin address
+  totalAmount: bigint;
+  network: SupportedNetwork;
+  deployedAt: number;
+}
+```
+
+### `RampSettlementDeployResult`
+
+Returned by `RampManager.deployRampSettlement()`.
+
+```typescript
+export interface RampSettlementDeployResult {
+  settlementAddress: string;
+  txHash: string;
+  treasury: string;
+  network: SupportedNetwork;
+  deployedAt: number;
+}
+```
+
+---
+
+## Escrow Types
+
+### `MilestoneStatus`
+
+On-chain state machine for each milestone. Mirrors the `MilestoneEscrow.MilestoneStatus` enum.
+
+```typescript
+export enum MilestoneStatus {
+  PENDING   = 0,
+  DELIVERED = 1,
+  DISPUTED  = 2,
+  RELEASED  = 3,
+  REFUNDED  = 4,
+}
+```
+
+### `Milestone`
+
+Returned by `EscrowManager.getMilestone()`. Mirrors the on-chain struct.
+
+```typescript
+export interface Milestone {
+  amount: bigint;
+  descriptionHash: string;   // bytes32 hex
+  status: MilestoneStatus;
+  deliveredAt: bigint;       // unix seconds
+  /** Funded independently per milestone — payer can pay in installments. */
+  funded: boolean;
+}
+```
+
+### `EscrowActivityType`
+
+All possible event types in an escrow's on-chain history.
+
+```typescript
+export type EscrowActivityType =
+  | "funded"
+  | "delivered"
+  | "released"
+  | "disputed"
+  | "resolved"
+  | "refunded"
+  | "cancel-vote"
+  | "cancelled"
+  | "arbiter-changed";
+```
+
+### `EscrowActivityEvent`
+
+A single normalized lifecycle event from an escrow's history, returned by `EscrowManager.getActivity()`.
+
+```typescript
+export interface EscrowActivityEvent {
+  type: EscrowActivityType;
+  /** Present for milestone-scoped events; absent for deal-level events. */
+  milestoneId?: number;
+  txHash: string;
+  /** Unix seconds; 0 if the underlying event didn't carry a timestamp. */
+  timestamp: number;
+  data?: Record<string, unknown>;
+}
+```
+
+---
+
+## Ramp Types
+
+### `RampDirection`
+
+```typescript
+export type RampDirection = "on-ramp" | "off-ramp";
+```
+
+### `RampSessionStatus`
+
+```typescript
+export enum RampSessionStatus {
+  PENDING    = "pending",
+  PROCESSING = "processing",
+  SETTLED    = "settled",
+  FAILED     = "failed",
+  REFUNDED   = "refunded",
+}
+```
+
+### `RampQuoteInput`
+
+```typescript
+export interface RampQuoteInput {
+  direction: RampDirection;
+  fiatCurrency: string;    // e.g. "NGN", "KES", "GHS"
+  tokenSymbol: string;     // e.g. "USDC", "USDT"
+  countryCode: string;     // ISO 3166-1 alpha-2
+  fiatAmount?: string;     // provide one of fiatAmount or tokenAmount
+  tokenAmount?: string;
+}
+```
+
+### `RampQuote`
+
+```typescript
+export interface RampQuote {
+  direction: RampDirection;
+  fiatCurrency: string;
+  fiatAmount: string;
+  tokenAmount: string;
+  tokenSymbol: string;
+  exchangeRate: string;
+  feeFiat: string;
+  expiresAt: number;  // unix seconds
+}
+```
+
+### `RampSession`
+
+```typescript
+export interface RampSession {
+  sessionId: string;
+  direction: RampDirection;
+  status: RampSessionStatus;
+  providerRef: string;
+  paymentUrl?: string;  // on-ramp only — where the payer completes fiat payment
+  createdAt: number;
+}
+```
+
+### `InitiateOnRampInput` / `InitiateOffRampInput`
+
+```typescript
+export interface InitiateOnRampInput {
+  fiatAmount: string;
+  fiatCurrency: string;
+  tokenSymbol: string;
+  recipientAddress: string;
+  countryCode: string;
+  customerReference?: string;
+}
+
+export interface InitiateOffRampInput {
+  tokenAmount: string;
+  tokenSymbol: string;
+  fiatCurrency: string;
+  payoutAccount: RampPayoutAccount;
+  countryCode: string;
+  customerReference?: string;
+}
+```
+
+### `RampPayoutAccount`
+
+```typescript
+export interface RampPayoutAccount {
+  type: "bank" | "mobile-money";
+  accountNumber: string;
+  accountName?: string;
+  bankCode?: string;   // for type: "bank"
+  provider?: string;   // for type: "mobile-money", e.g. "MTN", "Airtel"
+}
+```
+
+### `RampProviderSelection`
+
+Declarative provider descriptor passed to `createRampProvider()`. Lets you select a provider by name plus credentials from config — no direct class import needed.
+
+```typescript
+export type RampProviderSelection =
+  | { provider: "manual"; exchangeRates?: Record<string, number>; feeBps?: number }
+  | { provider: "stellar-anchor"; homeDomain: string }
+  | { provider: "moonpay"; apiKey: string; secretKey: string; sandbox?: boolean };
+```
+
+---
+
+## Loan Types
+
+Loan types are used with `CollateralVault`, which is currently deployed on Stellar testnet only.
+
+### `LoanStatus`
+
+Mirrors the `CollateralVault.LoanStatus` enum.
+
+```typescript
+export enum LoanStatus {
+  OPEN       = 0,
+  REPAID     = 1,
+  LIQUIDATED = 2,
+}
+```
+
+### `Loan`
+
+```typescript
+export interface Loan {
+  borrower: string;
+  collateralToken: string;
+  collateralAmount: bigint;
+  borrowedToken: string;
+  borrowedAmount: bigint;
+  /** LTV at open time — locked in and does not change if the vault's global config changes later. */
+  ltvBps: number;
+  openedAt: bigint;
+  status: LoanStatus;
+}
+```
+
+---
+
+## Indexer Types
+
+These types are used with `IndexerClient`, which talks to a running `@ankarachain/indexer` service rather than directly to a chain.
+
+### `IndexedEvent`
+
+```typescript
+export interface IndexedEvent {
+  id: string;
+  contract: string;
+  eventType: string;
+  ledger: number;
+  txHash: string;
+  timestamp: number;
+  data: unknown;
+}
+```
+
+### `EventQueryFilter`
+
+```typescript
+export interface EventQueryFilter {
+  contract?: string;
+  type?: string;
+  since?: number;   // unix seconds
+  limit?: number;
+}
+```
+
+### `RegisteredWebhook`
+
+```typescript
+export interface RegisteredWebhook {
+  id: string;
+  url: string;
+  events: string[];
+  /** Only present in the response from registerWebhook() — shown once, at creation. Absent from listWebhooks(). */
+  secret?: string;
+  createdAt: number;
+}
+```

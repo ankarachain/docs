@@ -1,0 +1,106 @@
+---
+title: "Ankara CLI: Deploy and Manage RWA Tokens from the Terminal"
+sidebarTitle: "Overview"
+description: "The ankara CLI provides an interactive wizard for deploying token factories, issuing RWA tokens, minting shares, and managing escrow — all from your terminal."
+---
+
+The `ankara` CLI is a thin, interactive wrapper around the Ankara Chain SDK. Instead of writing deployment scripts by hand, you run a single command and answer prompts — the CLI constructs the transaction, submits it through your configured network, and saves the result to `ankara.config.json` so every subsequent command knows which contracts you own.
+
+## Installation
+
+You can use the CLI without a global install, or add it to your project permanently.
+
+```bash
+# Option 1: Use without installing (always pulls the latest version)
+npx ankara <command>
+
+# Option 2: Install globally
+npm install -g @ankarachain/cli
+```
+
+<Note>
+Node.js 18 or later is required. Run `node --version` to check.
+</Note>
+
+## Configuration: `ankara.config.json`
+
+Running `ankara init` generates an `ankara.config.json` file in your project root. This file is the source of truth for every CLI command — it tells the CLI which network to target, which factory contracts are deployed, and which tokens you have already issued.
+
+| Field | Type | Description |
+|---|---|---|
+| `version` | `string` | Config schema version, currently `"1.0"` |
+| `network` | `string` | Target network identifier (e.g. `"polygon-amoy"`, `"celo"`) |
+| `factoryAddress` | `string` | Address of your deployed `TokenFactory` contract |
+| `rpcUrl` | `string` | Optional custom JSON-RPC endpoint; overrides the SDK default |
+| `deployments` | `array` | Records of every token and escrow contract you have deployed |
+
+After running `ankara init` and `ankara deploy-factory`, your config file will look similar to this:
+
+```json
+{
+  "version": "1.0",
+  "network": "polygon-amoy",
+  "factoryAddress": "0xA1b2C3d4E5f6A1b2C3d4E5f6A1b2C3d4E5f6A1b2",
+  "deployments": [
+    {
+      "tokenAddress": "0xDeAdBeEf00000000000000000000000000000001",
+      "assetId": "FARMLAND-001",
+      "template": "farmland",
+      "name": "Kano Farmland Token",
+      "symbol": "KFT",
+      "countryCode": "NG",
+      "txHash": "0xabc123...",
+      "deployedAt": 1718000000,
+      "network": "polygon-amoy"
+    }
+  ]
+}
+```
+
+<Tip>
+Commit `ankara.config.json` to version control — it contains no secrets and is safe to share with your team. Each developer uses their own `.env` for signing keys.
+</Tip>
+
+## Environment Variables
+
+The CLI reads signing credentials from a `.env` file in your project root. You need exactly one of the following variables set, depending on your target network.
+
+```bash
+# EVM networks (Polygon, Celo, BNB, Ethereum)
+PRIVATE_KEY=0xYourWalletPrivateKeyHere
+
+# Stellar networks (Soroban testnet / mainnet)
+STELLAR_SECRET_KEY=SYourStellarSecretSeedHere
+
+# Optional: override the default RPC endpoint
+RPC_URL=https://your-custom-rpc.example.com
+```
+
+<Warning>
+**Never commit your `.env` file.** `ankara init` automatically adds `.env` to your `.gitignore`, but verify this before your first `git push`. Anyone who obtains your private key has full control of your deployer wallet and every contract it owns.
+</Warning>
+
+## Command Categories
+
+The CLI groups its commands into eight functional areas. Use this table to find the right command for your task, then see the [Commands reference](/cli/commands) for full flag and option details.
+
+| Category | Commands | What you can do |
+|---|---|---|
+| **Project Setup** | `init`, `deploy-factory` | Scaffold a new project, deploy the factory contract suite |
+| **Token Deployment** | `deploy`, `deploy-nft`, `deploy-batch`, `deploy-pool` | Deploy ERC-20 RWA tokens, ERC-721 NFT asset records, ERC-1155 commodity batches, and pool vaults |
+| **Token Operations** | `mint`, `batch-mint`, `transfer`, `status`, `register-batch` | Issue and move tokens, query on-chain asset state |
+| **Escrow** | `deploy-escrow`, `escrow-fund`, `escrow-deliver`, `escrow-approve`, `escrow-dispute`, `escrow-resolve`, `escrow-claim-timelock`, `escrow-status` | Deploy and operate milestone-based payment escrow for diaspora transactions |
+| **Fiat Ramp** | `ramp-quote`, `onramp-initiate`, `offramp-initiate`, `offramp-confirm`, `offramp-refund`, `ramp-status`, `deploy-ramp-settlement`, `onramp-record` | Get quotes, initiate on/off-ramps, and manage settlement contracts |
+| **Oracle** | `oracle-set` | Push price data to your deployed ManualOracle contract |
+| **Collateral / Pool** | `deposit`, `pool-status` | Deposit collateral into a vault and inspect pool state |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Commands Reference" icon="terminal" href="/cli/commands">
+    Full flags, arguments, and example output for every `ankara` command.
+  </Card>
+  <Card title="MCP Server" icon="robot" href="/mcp/overview">
+    Deploy tokens and manage escrow through Claude and other AI assistants.
+  </Card>
+</CardGroup>

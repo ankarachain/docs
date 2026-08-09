@@ -1,0 +1,89 @@
+---
+title: "Ankara Chain Smart Contract Architecture"
+sidebarTitle: "Overview"
+description: "Ankara Chain deploys upgradeable ERC-1967 proxy contracts on EVM chains and Soroban contracts on Stellar — all MIT licensed and open source."
+---
+
+Ankara Chain ships two parallel contract suites — Solidity contracts for EVM-compatible chains and Rust/Soroban contracts for the Stellar network. Both suites expose the same logical interface through the SDK's adapter layer, so application code written against one chain works on the other with a config change. Every contract is MIT licensed, open source, and audited for production use. You deploy them yourself; Ankara Chain never holds custody of your keys or your assets.
+
+---
+
+## Contract suite overview
+
+<CardGroup cols={1}>
+  <Card title="Token Contracts" icon="coins">
+    | Contract | Type | Description |
+    |---|---|---|
+    | `AnkaraChainBaseToken` | ERC-20 base | UUPS upgradeable base inherited by all six ERC-20 templates. Adds `assetId`, `countryCode`, `status`, `pause/unpause`, and `identityVerifier` to a standard OpenZeppelin ERC-20. |
+    | `FarmlandToken` | ERC-20 template | Tokenizes agricultural land. On-chain metadata: location, area, soil type, irrigation, crop history, title document hash, valuation. |
+    | `CommodityReceiptToken` | ERC-20 template | Tokenizes warehouse receipts for physical commodities. Tracks commodity type, quantity, grade, warehouse, deposit and expiry dates. |
+    | `RealEstateToken` | ERC-20 template | Tokenizes fractional real estate. Tracks property type, address, area, title, valuation, rental yield (bps), occupancy status. |
+    | `InvoiceToken` | ERC-20 template | Tokenizes trade finance invoices. Tracks face value, discount rate, issuance and due dates, currency (ISO 4217). |
+    | `CarbonCreditToken` | ERC-20 template | Tokenizes verified carbon credits with on-chain retirement. Tracks standard (REDD+, VCS, etc.), vintage year, CO₂e quantity, project type. |
+    | `MiningRightsToken` | ERC-20 template | Tokenizes mining concession licenses. Tracks mineral type, concession area, license expiry, royalty rate (bps). |
+  </Card>
+  <Card title="Factory Contracts" icon="factory">
+    | Contract | Description |
+    |---|---|
+    | `TokenFactory` | Deploys ERC-1967 proxy instances of the six ERC-20 templates. One factory per network; admins register template implementation addresses. |
+    | `NFTFactory` | Deploys ERC-721 NFT contracts for `farmland-nft`, `real-estate-nft`, `mining-rights-nft`, and `commodity-vault-nft`. |
+    | `MultiTokenFactory` | Deploys ERC-1155 contracts for `commodity-batch` (warehouse receipts with multiple batch IDs) and `pool-vault` (NAV-accruing investment pool). |
+    | `EscrowFactory` | Deploys per-deal `MilestoneEscrow` contracts. Maintains a whitelist of accepted stablecoins. |
+    | `RampSettlementFactory` | Deploys per-integration `RampSettlement` contracts for on-chain recording of fiat on/off-ramp activity. |
+  </Card>
+  <Card title="Supporting Contracts" icon="gears">
+    | Contract | Description |
+    |---|---|
+    | `WhitelistVerifier` | Implements `IIdentityVerifier`. Admin-managed allowlist; tokens that set an `identityVerifier` will gate transfers and minting through this contract. |
+    | `ManualOracle` | Admin-set price oracle used by `PoolVault` for NAV calculation. Exposes `setPrice`, `getPrice`, and a configurable staleness threshold. |
+    | `CollateralVault` | Collateralized lending against tokenized assets (Stellar testnet only in v1). Borrowers lock an Ankara token as collateral to borrow a stablecoin at a fixed LTV. |
+  </Card>
+</CardGroup>
+
+---
+
+## UUPS proxy pattern
+
+Every ERC-20 token deployed through `TokenFactory` is an **ERC-1967 proxy**. The proxy stores your token's state (balances, metadata, status) and delegates all logic calls to one of the six template implementation contracts. This means:
+
+- **You can upgrade** a deployed token by calling `upgradeToAndCall` on the proxy — only the deployer (admin) can do this.
+- **Templates are shared** across all tokens of the same type. If a bug is found in `FarmlandToken`, a new implementation is deployed once and you point your proxy to it.
+- **The proxy address is permanent** — your token's on-chain address never changes after deployment, even after an upgrade.
+
+```solidity
+// Under the hood — what TokenFactory does when you call deployFarmland():
+ERC1967Proxy proxy = new ERC1967Proxy(
+    farmlandImplementation,
+    abi.encodeCall(FarmlandToken.initialize, (name, symbol, assetId, ...))
+);
+```
+
+The SDK's `TokenFactory` class handles all of this for you via `deployFarmland()`, `deployCommodity()`, etc.
+
+<Note>
+  The UUPS implementation uses OpenZeppelin Contracts v5. The upgrade authority is the `admin` address set at deployment time — by default, the deployer's wallet. Store this key securely; losing it means you lose upgrade control over your tokens.
+</Note>
+
+---
+
+## Roles and access control
+
+Every deployed token carries a small permission model:
+
+| Role | Who holds it | What it controls |
+|---|---|---|
+| **Owner / Admin** | Your deployer wallet (or an address you specify via `admin`) | `mint`, `burn`, `setStatus`, `pause/unpause`, `setIdentityVerifier`, all metadata-update functions, and UUPS upgrades |
+| **Arbiter** | Optional — any address you pass to `DeployEscrowOptions.arbiter` | Dispute resolution in `MilestoneEscrow` — can release funds to payee or refund to payer |
+| **Identity Verifier** | Optional — a deployed `WhitelistVerifier` (or any `IIdentityVerifier` implementation) | Gates who can receive tokens; set per-token via `setIdentityVerifier` |
+
+There is no Ankara Chain platform key with any privilege over your contracts. Once deployed, the contracts are fully under your admin key's control.
+
+---
+
+## License
+
+All Ankara Chain smart contracts are released under the **MIT License**. You may use, fork, and redistribute them freely. Attribution is appreciated but not required.
+
+<Warning>
+  The contracts are designed for production and have been audited. However, the deployer is responsible for custody of the admin key, correct configuration of identity verifiers, and any regulatory compliance obligations in their jurisdiction. Deploying tokenized RWAs may be subject to securities law in your country.
+</Warning>

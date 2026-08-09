@@ -1,0 +1,450 @@
+---
+title: "Deploy an RWA Token with Ankara Chain SDK"
+sidebarTitle: "Deploy Token"
+description: "Step-by-step guide to deploying a tokenized real-world asset using TokenFactory — from project setup through a live ERC-20 or Soroban token on-chain."
+---
+
+Ankara Chain's `TokenFactory` class is the single entry point for deploying tokenized real-world assets on either an EVM chain or Stellar. You provide a config object — network, signer, and factory contract address — and call one of the template-specific deploy methods. The factory handles encoding your asset metadata and broadcasting the deployment transaction, returning a `DeployResult` with the new token address as soon as the transaction is confirmed.
+
+## Prerequisites
+
+Install the SDK and ethers if you haven't already:
+
+```bash
+npm install @ankarachain/sdk ethers
+```
+
+---
+
+## Deploy a fungible RWA token
+
+<Tabs>
+  <Tab title="EVM">
+
+    Construct a `TokenFactory` with an `EVMAnkaraChainConfig`. Your `signer` must be an [ethers.js `Signer`](https://docs.ethers.org/v6/api/providers/#Signer) that has enough native gas on the target chain.
+
+    ### Farmland token (full example)
+
+    ```typescript
+    import { TokenFactory } from "@ankarachain/sdk";
+    import type { DeployFarmlandOptions } from "@ankarachain/sdk";
+    import { ethers } from "ethers";
+
+    const provider = new ethers.JsonRpcProvider("https://rpc-amoy.polygon.technology");
+    const signer   = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+
+    const factory = new TokenFactory({
+      network:        "polygon-amoy",
+      signer,
+      factoryAddress: "0xYourFactoryAddress",
+    });
+
+    const now = BigInt(Math.floor(Date.now() / 1000));
+
+    const opts: DeployFarmlandOptions = {
+      name:        "Kano Farmland Token",
+      symbol:      "KFT",
+      assetId:     "KANO-FARM-001",       // unique identifier for your registry
+      countryCode: "NG",                  // ISO 3166-1 alpha-2
+      metadata: {
+        location:          "12.0022, 8.5919",
+        areaSqMeters:      BigInt(10_000),
+        soilType:          "loam",
+        irrigationType:    "rain-fed",
+        cropHistory:       "maize,sorghum,fallow",
+        titleDocumentHash: ethers.ZeroHash,   // bytes32 — replace with real doc hash
+        valuationUSD:      ethers.parseEther("50000"),  // 18-decimal fixed-point
+        stateRegion:       "Kano State",
+        lastUpdated:       now,
+      },
+    };
+
+    const result = await factory.deployFarmland(opts);
+
+    console.log("Token address:", result.tokenAddress);
+    console.log("Tx hash:      ", result.txHash);
+    console.log("Deployed at:  ", new Date(result.deployedAt * 1000).toISOString());
+    ```
+
+    ### Other EVM template snippets
+
+    Each template follows the same pattern — swap the method name and provide the corresponding metadata shape.
+
+    <CodeGroup>
+
+    ```typescript Commodity
+    import type { DeployCommodityOptions } from "@ankarachain/sdk";
+
+    const sixMonths = BigInt(60 * 60 * 24 * 180);
+
+    const opts: DeployCommodityOptions = {
+      name: "Lagos Maize Receipt", symbol: "LMR",
+      assetId: "MAIZE-WH-001", countryCode: "NG",
+      metadata: {
+        commodityType:        "maize",
+        quantityKg:           BigInt(5_000),
+        gradeClassification:  "Grade A",
+        warehouseId:          "WH-001",
+        warehouseLocation:    "Lagos, Nigeria",
+        depositDate:          now,
+        expiryDate:           now + sixMonths,
+        inspectionReportHash: ethers.ZeroHash,
+        valuationUSD:         ethers.parseEther("10000"),
+        harvestSeason:        "2025/2026",
+        lastUpdated:          now,
+      },
+    };
+
+    const result = await factory.deployCommodity(opts);
+    ```
+
+    ```typescript Real Estate
+    import type { DeployRealEstateOptions } from "@ankarachain/sdk";
+
+    const opts: DeployRealEstateOptions = {
+      name: "Victoria Island Office", symbol: "VIO",
+      assetId: "PROP-VI-001", countryCode: "NG",
+      metadata: {
+        propertyId:        "PROP-001",
+        propertyType:      "Commercial",
+        locationAddress:   "12 Victoria Island, Lagos",
+        totalAreaSqMeters: BigInt(200),
+        titleDocumentHash: ethers.ZeroHash,
+        valuationUSD:      ethers.parseEther("250000"),
+        rentalYieldBps:    BigInt(600),   // 6 %
+        occupancyStatus:   "Tenanted",
+        developerAddress:  ethers.ZeroAddress,
+        lastUpdated:       now,
+      },
+    };
+
+    const result = await factory.deployRealEstate(opts);
+    ```
+
+    ```typescript Invoice
+    import type { DeployInvoiceOptions } from "@ankarachain/sdk";
+
+    const opts: DeployInvoiceOptions = {
+      name: "Acme Supply Invoice", symbol: "ASI",
+      assetId: "INV-2025-001", countryCode: "NG",
+      metadata: {
+        invoiceNumber:       "INV-2025-001",
+        debtorReference:     "DEBTOR-001",
+        faceValueUSD:        ethers.parseEther("100000"),
+        discountRateBps:     BigInt(200),    // 2 %
+        issuanceDate:        now,
+        dueDate:             now + BigInt(60 * 60 * 24 * 90),  // 90 days
+        invoiceDocumentHash: ethers.ZeroHash,
+        currency:            "NGN",
+        lastUpdated:         now,
+      },
+    };
+
+    const result = await factory.deployInvoice(opts);
+    ```
+
+    ```typescript Carbon Credit
+    import type { DeployCarbonCreditOptions } from "@ankarachain/sdk";
+
+    const opts: DeployCarbonCreditOptions = {
+      name: "Congo Basin REDD+", symbol: "CBR",
+      assetId: "CARBON-DRC-001", countryCode: "CD",
+      metadata: {
+        creditType:          "REDD+",
+        verificationBodyRef: "VERRA-001",
+        vintageYear:         BigInt(2025),
+        quantityCO2e:        ethers.parseEther("1000"),  // 1 000 tCO₂e
+        projectLocation:     "Congo Basin, DRC",
+        projectType:         "Forestry",
+        verificationDocHash: ethers.ZeroHash,
+        lastUpdated:         now,
+      },
+    };
+
+    const result = await factory.deployCarbonCredit(opts);
+    ```
+
+    ```typescript Mining Rights
+    import type { DeployMiningRightsOptions } from "@ankarachain/sdk";
+
+    const opts: DeployMiningRightsOptions = {
+      name: "North Block Gold Rights", symbol: "NBG",
+      assetId: "MINE-GH-001", countryCode: "GH",
+      metadata: {
+        licenseNumber:       "LIC-001",
+        mineralType:         "Gold",
+        concessionArea:      "North Block A",
+        areaHectares:        BigInt(500),
+        licenseExpiry:       now + BigInt(60 * 60 * 24 * 365),
+        issuingAuthority:    "Minerals Commission Ghana",
+        licenseDocumentHash: ethers.ZeroHash,
+        royaltyRateBps:      BigInt(300),   // 3 %
+        lastUpdated:         now,
+      },
+    };
+
+    const result = await factory.deployMiningRights(opts);
+    ```
+
+    </CodeGroup>
+
+  </Tab>
+  <Tab title="Stellar">
+
+    Pass `network: "stellar-testnet"` and a `stellarSecretKey` (starts with `"S..."`). The factory will construct a `StellarAdapter` and deploy a Soroban token contract instead of an EVM one. All metadata fields and method names are identical.
+
+    ```typescript
+    import { TokenFactory } from "@ankarachain/sdk";
+    import type { DeployFarmlandOptions } from "@ankarachain/sdk";
+
+    const factory = new TokenFactory({
+      network:          "stellar-testnet",
+      stellarSecretKey: process.env.STELLAR_SECRET_KEY!,
+      factoryAddress:   "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+    });
+
+    const now = BigInt(Math.floor(Date.now() / 1000));
+
+    const opts: DeployFarmlandOptions = {
+      name:        "Rift Valley Farmland",
+      symbol:      "RVF",
+      assetId:     "RIFT-FARM-001",
+      countryCode: "KE",
+      metadata: {
+        location:          "-0.0236, 37.9062",
+        areaSqMeters:      BigInt(8_000),
+        soilType:          "volcanic",
+        irrigationType:    "drip",
+        cropHistory:       "tea,coffee,fallow",
+        titleDocumentHash: "0x0000000000000000000000000000000000000000000000000000000000000000",
+        valuationUSD:      BigInt("40000000000000000000000"),  // 40 000 USD in wei
+        stateRegion:       "Rift Valley",
+        lastUpdated:       now,
+      },
+    };
+
+    const result = await factory.deployFarmland(opts);
+
+    console.log("Contract ID:", result.tokenAddress);   // Stellar contract ID (starts with "C...")
+    console.log("Tx hash:    ", result.txHash);
+    ```
+
+    <Note>
+      On Stellar, `result.tokenAddress` is a Soroban contract ID (a `"C..."` string), not a `"0x..."` EVM address. Use it the same way everywhere else in the SDK.
+    </Note>
+
+    <Warning>
+      Never pass `stellarSecretKey` in browser code. Use `stellarSigner` with a Freighter-compatible wallet instead — see the [React Hooks guide](/guides/react-hooks) for details.
+    </Warning>
+
+  </Tab>
+</Tabs>
+
+---
+
+## DeployResult shape
+
+Every `deployFarmland`, `deployCommodity`, `deployRealEstate`, `deployInvoice`, `deployCarbonCredit`, and `deployMiningRights` call resolves to a `DeployResult`:
+
+```typescript
+interface DeployResult {
+  tokenAddress: string;          // EVM: "0x..." | Stellar: "C..."
+  txHash:       string;          // transaction hash / ledger hash
+  assetId:      string;          // the assetId you passed in
+  template:     AssetTemplate;   // "farmland" | "commodity" | "real-estate" | ...
+  network:      SupportedNetwork;
+  deployedAt:   number;          // Unix timestamp (seconds)
+}
+```
+
+---
+
+## NFT tokens
+
+Use the NFT deploy methods when you need a non-fungible title deed rather than fractional shares. Each returns an `NFTDeployResult` with `nftAddress` instead of `tokenAddress`.
+
+<CodeGroup>
+
+```typescript Farmland NFT
+import type { DeployFarmlandNFTOptions } from "@ankarachain/sdk";
+
+const opts: DeployFarmlandNFTOptions = {
+  name: "Kano Farmland Deed", symbol: "KFND",
+  assetId: "KANO-DEED-001", countryCode: "NG",
+  metadata: {
+    location:          "12.0022, 8.5919",
+    areaSqMeters:      BigInt(10_000),
+    soilType:          "loam",
+    irrigationType:    "rain-fed",
+    cropHistory:       "maize,sorghum,fallow",
+    titleDocumentHash: ethers.ZeroHash,
+    surveyReportHash:  ethers.ZeroHash,
+    stateRegion:       "Kano State",
+    lastUpdated:       now,
+  },
+};
+
+const nftResult = await factory.deployFarmlandNFT(opts);
+console.log("NFT contract:", nftResult.nftAddress);
+```
+
+```typescript Real Estate NFT
+import type { DeployRealEstateNFTOptions } from "@ankarachain/sdk";
+
+const opts: DeployRealEstateNFTOptions = {
+  name: "Lagos Property Deed", symbol: "LPD",
+  assetId: "PROP-DEED-001", countryCode: "NG",
+  metadata: {
+    propertyId:        "PROP-001",
+    propertyType:      "Residential",
+    locationAddress:   "4 Banana Island, Lagos",
+    totalAreaSqMeters: BigInt(450),
+    titleDocumentHash: ethers.ZeroHash,
+    valuationUSD:      ethers.parseEther("500000"),
+    rentalYieldBps:    BigInt(550),
+    developerAddress:  ethers.ZeroAddress,
+    lastUpdated:       now,
+  },
+};
+
+const nftResult = await factory.deployRealEstateNFT(opts);
+```
+
+```typescript Mining Rights NFT
+import type { DeployMiningRightsNFTOptions } from "@ankarachain/sdk";
+
+const opts: DeployMiningRightsNFTOptions = {
+  name: "Ashanti Gold Deed", symbol: "AGD",
+  assetId: "MINE-DEED-001", countryCode: "GH",
+  metadata: {
+    licenseNumber:       "LIC-GH-001",
+    mineralType:         "Gold",
+    concessionArea:      "Ashanti Belt A",
+    areaHectares:        BigInt(200),
+    licenseExpiry:       now + BigInt(60 * 60 * 24 * 365),
+    issuingAuthority:    "Minerals Commission Ghana",
+    licenseDocumentHash: ethers.ZeroHash,
+    royaltyRateBps:      BigInt(300),
+    lastUpdated:         now,
+  },
+};
+
+const nftResult = await factory.deployMiningRightsNFT(opts);
+```
+
+```typescript Commodity Vault NFT
+import type { DeployCommodityVaultNFTOptions } from "@ankarachain/sdk";
+
+const opts: DeployCommodityVaultNFTOptions = {
+  name: "Lagos Port Vault", symbol: "LPV",
+  assetId: "VAULT-001", countryCode: "NG",
+  metadata: {
+    warehouseId:          "WH-APAPA-01",
+    warehouseLocation:    "Apapa Port, Lagos",
+    operatorAddress:      "0xOperatorAddress",
+    commodityType:        "cocoa",
+    quantityKg:           BigInt(20_000),
+    gradeClassification:  "Grade A",
+    certificateHash:      ethers.ZeroHash,
+    depositDate:          now,
+    lastUpdated:          now,
+  },
+};
+
+const nftResult = await factory.deployCommodityVaultNFT(opts);
+```
+
+</CodeGroup>
+
+---
+
+## Multi-token contracts
+
+Use multi-token contracts when a single on-chain deployment needs to track many commodity batches (ERC-1155 warehouse receipts) or pool together multiple assets (a fund-style PoolVault).
+
+<CodeGroup>
+
+```typescript Commodity Batch (ERC-1155)
+import type { DeployCommodityBatchOptions } from "@ankarachain/sdk";
+
+const opts: DeployCommodityBatchOptions = {
+  name:        "Apapa Warehouse",
+  countryCode: "NG",
+  baseURI:     "https://meta.yourplatform.io/batches/",
+  warehouse: {
+    warehouseId:       "WH-APAPA-01",
+    warehouseLocation: "Apapa Port, Lagos",
+    operatorAddress:   "0xOperatorAddress",
+  },
+};
+
+const result = await factory.deployCommodityBatchToken(opts);
+console.log("ERC-1155 contract:", result.contractAddress);
+```
+
+```typescript Pool Vault
+import type { DeployPoolVaultOptions } from "@ankarachain/sdk";
+
+const opts: DeployPoolVaultOptions = {
+  name:             "West Africa RWA Fund",
+  symbol:           "WARF",
+  assetId:          "FUND-001",
+  countryCode:      "NG",
+  managementFeeBps: 50,   // 0.5 %
+};
+
+const result = await factory.deployPoolVault(opts);
+console.log("PoolVault contract:", result.contractAddress);
+```
+
+</CodeGroup>
+
+Both calls return a `MultiTokenDeployResult`:
+
+```typescript
+interface MultiTokenDeployResult {
+  contractAddress: string;
+  txHash:          string;
+  template:        "commodity-batch" | "pool-vault";
+  network:         SupportedNetwork;
+  deployedAt:      number;
+}
+```
+
+---
+
+## Reading asset metadata after deploy
+
+After a token is deployed, use `AssetRegistry` to read and write its on-chain metadata. Construct it with the adapter from your `TokenFactory` instance and the address from `DeployResult`:
+
+```typescript
+import { AssetRegistry } from "@ankarachain/sdk";
+
+const registry = new AssetRegistry(
+  factory.adapter,
+  result.tokenAddress,
+  "farmland"     // must match the template you deployed
+);
+
+const name        = await registry.getName();
+const status      = await registry.getStatus();       // AssetStatus enum
+const valuation   = await registry.getValuationUSD(); // bigint, 18-decimal
+const metadata    = await registry.getMetadata();     // full FarmlandMetadata object
+const version     = await registry.getVersion();
+```
+
+`AssetRegistry` also exposes write methods (`updateValuation`, `setStatus`, `mint`, `pause`, and template-specific actions like `retire` for carbon credits). See the [SDK reference](/sdk/asset-registry) for the full API.
+
+---
+
+## CLI quick-start
+
+If you prefer an interactive terminal flow, the Ankara Chain CLI wraps all of the above in a guided prompt. Install it once and run:
+
+```bash
+npm install -g @ankarachain/cli
+
+ankara deploy
+```
+
+The CLI walks you through template selection, metadata prompts, and a confirmation step, then writes the new token address and tx hash to your local `ankara.config.json`.

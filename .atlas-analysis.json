@@ -1,0 +1,120 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Ankara Chain",
+  "projectDescription": "Open-source RWA tokenization infrastructure for African markets — a TypeScript SDK, CLI, and smart contract suite that lets developers tokenize real-world assets (farmland, commodities, real estate, invoices, carbon credits, mining rights) on EVM chains and Stellar without writing Solidity.",
+  "theme": "luma",
+  "primaryColor": "#7c7c7c",
+  "lightColor": "#0d0d0d",
+  "darkColor": "#eadcda",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "quickstart-stellar"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/asset-templates",
+              "concepts/networks",
+              "concepts/identity"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/deploy-token",
+              "guides/mint-tokens",
+              "guides/escrow",
+              "guides/ramp",
+              "guides/react-hooks"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "cli/overview",
+              "cli/commands"
+            ]
+          },
+          {
+            "group": "MCP Server",
+            "pages": [
+              "mcp/overview"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "SDK Reference",
+        "groups": [
+          {
+            "group": "SDK",
+            "pages": [
+              "sdk/token-factory",
+              "sdk/asset-registry",
+              "sdk/escrow-manager",
+              "sdk/ramp-manager",
+              "sdk/collateral-vault",
+              "sdk/indexer-client"
+            ]
+          },
+          {
+            "group": "Types & Config",
+            "pages": [
+              "sdk/types",
+              "sdk/networks",
+              "sdk/abis"
+            ]
+          },
+          {
+            "group": "Contracts",
+            "pages": [
+              "contracts/overview",
+              "contracts/evm",
+              "contracts/stellar",
+              "contracts/escrow"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Six pre-audited asset class templates: Farmland, Commodity, Real Estate, Invoice, Carbon Credit, Mining Rights",
+    "Deploy tokens via CLI wizard or TypeScript SDK with no Solidity required",
+    "Multi-chain support: Polygon, Ethereum, BNB Chain, Celo, and Stellar (Soroban)",
+    "Milestone-based escrow contract for tranche payments",
+    "Fiat on-ramp / off-ramp integration with pluggable provider interface (MoonPay, Stellar Anchor, Manual)",
+    "Collateral vault for asset-backed lending on Stellar",
+    "React hooks for wallet balances and asset metadata in browser apps",
+    "MCP server for AI-assisted token deployment via Claude and other LLMs",
+    "Event indexer with webhook delivery for on-chain contract events",
+    "Pluggable KYC interface (IIdentityVerifier) supporting Smile Identity, Persona, and custom providers"
+  ],
+  "publicApiSurface": [
+    "TokenFactory — deployFarmland(), deployCommodity(), deployRealEstate(), deployInvoice(), deployCarbonCredit(), deployMiningRights()",
+    "TokenFactory — deployFarmlandNFT(), deployRealEstateNFT(), deployMiningRightsNFT(), deployCommodityVaultNFT()",
+    "TokenFactory — deployCommodityBatch(), deployPoolVault()",
+    "TokenFactory — deployEscrow(), deployRampSettlement()",
+    "AssetRegistry — getMetadata(), updateValuation(), getStatus(), getVersion()",
+    "EscrowManager — fund(), markDelivered(), approveMilestone(), dispute(), resolve(), refund()",
+    "RampManager — getQuote(), initiateOnRamp(), initiateOffRamp(), getStatus()",
+    "CollateralVault — openLoan(), repayLoan(), getLoan()",
+    "IndexerClient — getEvents(), registerWebhook(), listWebhooks(), deleteWebhook()",
+    "React hooks — useAnkaraChain(), useAsset(), useTokenBalance()",
+    "CLI — ankara init, ankara deploy-factory, ankara deploy, ankara mint, ankara status",
+    "CLI — ankara deploy-escrow, ankara escrow-fund, ankara escrow-deliver, ankara escrow-approve",
+    "CLI — ankara onramp-initiate, ankara offramp-initiate, ankara ramp-quote, ankara ramp-status",
+    "CLI — ankara deploy-nft, ankara batch-mint, ankara register-batch",
+    "MCP tools — deploy_token, get_token_status, deploy_escrow, fund_milestone, release_milestone"
+  ]
+}

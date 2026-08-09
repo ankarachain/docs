@@ -1,0 +1,238 @@
+---
+title: "RWA Asset Templates: Six Tokenizable Asset Classes"
+sidebarTitle: "Asset Templates"
+description: "Ankara Chain provides six pre-audited asset class templates for tokenizing farmland, commodities, real estate, invoices, carbon credits, and mining rights."
+---
+
+Ankara Chain ships six pre-audited smart contract templates, each designed for a specific asset class common in African markets. Rather than writing token contracts from scratch, you pick the template that matches your asset, supply its metadata, and deploy — the contract handles on-chain storage, lifecycle management, and transfer controls.
+
+## Fungible Token Templates
+
+Each of the six templates deploys as an ERC-20 (on EVM chains) or SEP-41 (on Stellar) fungible token, suitable for fractional ownership. You deploy one contract per tokenized asset.
+
+---
+
+### 1. Farmland
+
+Tokenize ownership of agricultural land. Each deployed `FarmlandToken` represents a single parcel of farmland, with its physical and legal attributes stored directly on-chain.
+
+**Template string:** `"farmland"`
+
+**Metadata fields (`FarmlandMetadata`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `location` | `string` | Human-readable location description |
+| `areaSqMeters` | `bigint` | Total area of the parcel in square metres |
+| `soilType` | `string` | Soil classification (e.g. clay, loam, sandy) |
+| `irrigationType` | `string` | Irrigation method (e.g. drip, flood, rain-fed) |
+| `cropHistory` | `string` | Recent crop rotation history |
+| `titleDocumentHash` | `string` | `bytes32` hash of the land title document |
+| `valuationUSD` | `bigint` | Current valuation in USD (denominated in wei, 1e18 = $1) |
+| `stateRegion` | `string` | State or region within the country |
+| `lastUpdated` | `bigint` | Unix timestamp of last metadata update |
+
+**Use cases:** Fractional farmland investment platforms, agricultural cooperatives, diaspora remittance-to-land schemes, collateral for crop finance.
+
+---
+
+### 2. Commodity Receipt
+
+Tokenize warehouse receipts for physical commodities. A `CommodityReceiptToken` represents a quantity of goods in a certified warehouse, giving holders a claim on the underlying stock.
+
+**Template string:** `"commodity"`
+
+**Metadata fields (`CommodityMetadata`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `commodityType` | `string` | Type of commodity (e.g. maize, cocoa, sorghum) |
+| `quantityKg` | `bigint` | Quantity in kilograms |
+| `gradeClassification` | `string` | Quality grade per applicable standard |
+| `warehouseId` | `string` | Identifier for the storing warehouse |
+| `warehouseLocation` | `string` | Physical warehouse location |
+| `depositDate` | `bigint` | Unix timestamp of deposit |
+| `expiryDate` | `bigint` | Unix timestamp after which the receipt expires |
+| `inspectionReportHash` | `string` | `bytes32` hash of the inspection report |
+| `valuationUSD` | `bigint` | Current valuation in USD |
+| `harvestSeason` | `string` | Season and year of harvest |
+| `lastUpdated` | `bigint` | Unix timestamp of last metadata update |
+
+**Use cases:** Structured commodity finance, warehouse receipt financing, grain aggregation platforms, post-harvest loss reduction schemes.
+
+<Note>
+  Commodity tokens expose an `assetIsExpired()` method that checks whether the current block timestamp has passed `expiryDate`. Call `assetMarkExpired()` to transition the asset to `EXPIRED` status when it lapses.
+</Note>
+
+---
+
+### 3. Real Estate
+
+Tokenize fractional ownership of property. `RealEstateToken` supports residential, commercial, industrial, and land asset types, with rental yield and occupancy state tracked on-chain.
+
+**Template string:** `"real-estate"`
+
+**Metadata fields (`RealEstateMetadata`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `propertyId` | `string` | Registry or cadastral identifier |
+| `propertyType` | `string` | `Residential`, `Commercial`, `Industrial`, or `Land` |
+| `locationAddress` | `string` | Street or plot address |
+| `totalAreaSqMeters` | `bigint` | Total floor or land area in square metres |
+| `titleDocumentHash` | `string` | `bytes32` hash of the title deed |
+| `valuationUSD` | `bigint` | Current valuation in USD |
+| `rentalYieldBps` | `bigint` | Annualised rental yield in basis points (e.g. `600` = 6%) |
+| `occupancyStatus` | `string` | `Vacant`, `Owner-occupied`, or `Tenanted` |
+| `developerAddress` | `string` | Wallet address of the originating developer |
+| `lastUpdated` | `bigint` | Unix timestamp of last metadata update |
+
+**Use cases:** Real estate investment trusts (REITs) on-chain, rental income distribution to token holders, property-backed lending, title registry integration.
+
+---
+
+### 4. Invoice
+
+Tokenize trade receivables. `InvoiceToken` represents the right to receive payment on a commercial invoice, enabling invoice discounting and supply chain finance on-chain.
+
+**Template string:** `"invoice"`
+
+**Metadata fields (`InvoiceMetadata`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `invoiceNumber` | `string` | Issuer's invoice reference number |
+| `debtorReference` | `string` | Identifier for the debtor entity |
+| `faceValueUSD` | `bigint` | Full face value of the invoice in USD |
+| `discountRateBps` | `bigint` | Discount rate in basis points applied to the face value |
+| `issuanceDate` | `bigint` | Unix timestamp of invoice issuance |
+| `dueDate` | `bigint` | Unix timestamp by which payment is due |
+| `invoiceDocumentHash` | `string` | `bytes32` hash of the invoice document |
+| `currency` | `string` | ISO 4217 currency code (e.g. `NGN`, `GHS`, `KES`, `USD`) |
+| `lastUpdated` | `bigint` | Unix timestamp of last metadata update |
+
+**Invoice lifecycle (`InvoiceStatus` enum):**
+
+| Status | Value | Meaning |
+|---|---|---|
+| `PENDING` | `0` | Invoice deployed, awaiting funding |
+| `FUNDED` | `1` | Invoice has been purchased by an investor |
+| `REPAID` | `2` | Debtor has settled the invoice |
+| `DEFAULTED` | `3` | Invoice is overdue and marked as defaulted |
+
+**Use cases:** Supply chain finance platforms, invoice discounting marketplaces, SME working capital, buyer-led finance programmes.
+
+---
+
+### 5. Carbon Credit
+
+Tokenize verified carbon offsets. `CarbonCreditToken` represents tonnes of CO₂ equivalent, with retirement tracked immutably on-chain against a named beneficiary.
+
+**Template string:** `"carbon-credit"`
+
+**Metadata fields (`CarbonCreditMetadata`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `creditType` | `string` | Standard: `REDD+`, `VCS`, `Gold Standard`, `GS4GG`, `CDM` |
+| `verificationBodyRef` | `string` | Reference to the accredited verification body |
+| `vintageYear` | `bigint` | Year the credits were generated |
+| `quantityCO2e` | `bigint` | Quantity in wei (1e18 = 1 tCO₂e) |
+| `projectLocation` | `string` | Country or region of the originating project |
+| `projectType` | `string` | `Forestry`, `Agriculture`, `Energy`, or `Waste` |
+| `verificationDocHash` | `string` | `bytes32` hash of the verification document |
+| `lastUpdated` | `bigint` | Unix timestamp of last metadata update |
+
+Each retirement is recorded as a `RetirementRecord` on-chain:
+
+| Field | Type | Description |
+|---|---|---|
+| `retiredBy` | `string` | Wallet address initiating the retirement |
+| `amount` | `bigint` | Amount retired in wei (1e18 = 1 tCO₂e) |
+| `timestamp` | `bigint` | Unix timestamp of the retirement event |
+| `beneficiary` | `string` | Entity the offset is claimed on behalf of |
+| `retirementNote` | `string` | Reason or project reference |
+
+**Use cases:** Corporate sustainability reporting, Kenyan and Nigerian carbon market platforms, voluntary carbon offset registries, deforestation credits.
+
+---
+
+### 6. Mining Rights
+
+Tokenize mineral extraction licences. `MiningRightsToken` represents a fractional interest in a licensed mining concession, with the licence expiry and royalty rate tracked on-chain.
+
+**Template string:** `"mining-rights"`
+
+**Metadata fields (`MiningRightsMetadata`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `licenseNumber` | `string` | Issuing authority's licence reference |
+| `mineralType` | `string` | Mineral: `Gold`, `Coltan`, `Copper`, `Diamond`, `Coal`, `Lithium` |
+| `concessionArea` | `string` | Name or identifier of the concession |
+| `areaHectares` | `bigint` | Area of the concession in hectares |
+| `licenseExpiry` | `bigint` | Unix timestamp of licence expiry |
+| `issuingAuthority` | `string` | Name of the regulatory body that issued the licence |
+| `licenseDocumentHash` | `string` | `bytes32` hash of the licence document |
+| `royaltyRateBps` | `bigint` | Royalty rate in basis points (e.g. `500` = 5%) |
+| `lastUpdated` | `bigint` | Unix timestamp of last metadata update |
+
+**Use cases:** Mining royalty streams as investable assets, licence-backed financing, DRC and West African mining investment vehicles.
+
+---
+
+## NFT Variants
+
+For unique assets — a single farm plot, a specific property title, or a single warehouse vault — Ankara Chain provides ERC-721 (EVM) and Soroban NFT (Stellar) variants. Unlike the fractional ERC-20 templates above, NFT templates issue a single non-fungible token per deployed contract.
+
+| Template | Type string | Represents |
+|---|---|---|
+| Farmland NFT | `"farmland-nft"` | A unique land parcel deed as a single NFT |
+| Real Estate NFT | `"real-estate-nft"` | A unique property title as a single NFT |
+| Mining Rights NFT | `"mining-rights-nft"` | A unique mining licence as a single NFT |
+| Commodity Vault NFT | `"commodity-vault-nft"` | A unique warehouse vault certificate as a single NFT |
+
+NFT templates share the same metadata shapes as their fractional counterparts (e.g. `FarmlandNFTMetadata` mirrors `FarmlandMetadata`), with the addition of a `surveyReportHash` field on `FarmlandNFTMetadata`. You can also link an NFT deed to a corresponding ERC-20 fractional token using `assetLinkToERC20()`.
+
+---
+
+## Multi-Token Variants
+
+Two additional templates use ERC-1155 (EVM) for scenarios involving batched or pooled asset positions.
+
+<CardGroup cols={2}>
+  <Card title="commodity-batch" icon="boxes-stacked">
+    **ERC-1155 batch token.** Deploy one `CommodityBatchToken` contract to represent multiple commodity batches in a single warehouse — each batch is a distinct token ID within the contract. Useful for warehouse operators managing rotating stock.
+  </Card>
+  <Card title="pool-vault" icon="building-columns">
+    **Pooled asset vault.** `PoolVaultToken` accepts deposits of multiple whitelisted stablecoins and issues a single pool share token back to investors. Supports a management fee in basis points and an oracle for NAV calculation.
+  </Card>
+</CardGroup>
+
+---
+
+## Asset Lifecycle
+
+Every fungible template tracks a lifecycle status on-chain through the `AssetStatus` enum. You advance the status explicitly using `AssetRegistry.setStatus()`.
+
+<Steps>
+  <Step title="DRAFT (0)">
+    The token is deployed but not yet live. Use this state while completing off-chain verification, uploading document hashes, or finalising metadata. Transfers may be restricted depending on your verifier configuration.
+  </Step>
+  <Step title="ACTIVE (1)">
+    The token is live and available for minting, transfer, and investment. This is the normal operating state.
+  </Step>
+  <Step title="SUSPENDED (2)">
+    The token is temporarily halted — for example during a regulatory review or legal dispute. The token contract is paused; no transfers or mints are processed.
+  </Step>
+  <Step title="REDEEMED (3)">
+    The underlying asset has been redeemed and the token's lifecycle is complete. For farmland this might mean the land has been sold; for invoices, the debt has been fully repaid and token holders have been paid out.
+  </Step>
+  <Step title="EXPIRED (4)">
+    The asset has lapsed — used primarily for commodity receipts past their `expiryDate` and mining rights past their `licenseExpiry`. The SDK exposes dedicated helper methods (`assetMarkExpired()`, `assetMarkLicenseExpired()`) for these transitions.
+  </Step>
+</Steps>
+
+<Warning>
+  Status transitions are one-directional in most cases. You cannot move a `REDEEMED` or `EXPIRED` token back to `ACTIVE`. Design your status management flow before going to mainnet.
+</Warning>

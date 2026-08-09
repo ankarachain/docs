@@ -1,47 +1,258 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Deploy Your First RWA Token on Polygon"
+sidebarTitle: "EVM Quickstart"
+description: "Learn how to deploy a tokenized real-world asset on Polygon Amoy testnet in under 30 minutes using the Ankara Chain SDK and CLI."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+This guide walks you through deploying a tokenized farmland asset on Polygon Amoy testnet using the Ankara Chain CLI and TypeScript SDK. By the end you will have a live ERC-20 token backed by on-chain asset metadata, minted fractional shares to an investor address, and a working TypeScript snippet you can drop into your application. The same steps apply to Ethereum, BNB Chain, and Celo — only the network name in your config changes.
 
 ## Prerequisites
 
-Before you begin, you must have:
+- **Node.js 18+** installed locally
+- **A throwaway wallet private key** — never use a key that holds real funds for testnet work
+- **Polygon Amoy testnet MATIC** — get free tokens at [faucet.polygon.technology](https://faucet.polygon.technology)
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+<Warning>
+  Keep your private key in `.env` only. The `ankara init` wizard adds `.env` to `.gitignore` automatically, but double-check before your first `git push`.
+</Warning>
 
-## Get started
+---
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Install the SDK and CLI">
+    Install the Ankara Chain TypeScript SDK as a project dependency:
 
     ```bash
-    npm install your-package
+    npm install @ankarachain/sdk
     ```
+
+    Or install the CLI globally so you can run `ankara` commands from any directory:
+
+    ```bash
+    npm install -g @ankarachain/cli
+    ```
+
+    You can also use the CLI without installing it globally by prefixing every command with `npx`:
+
+    ```bash
+    npx ankara <command>
+    ```
+
+    <Tip>
+      The SDK has `ethers` as a peer dependency. If your project does not already have it, install ethers v6 alongside the SDK: `npm install ethers`.
+    </Tip>
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Initialize your project">
+    Run the `ankara init` wizard to scaffold a project directory and generate your config:
 
     ```bash
-    your-cli init
+    npx ankara init my-rwa-project
     ```
+
+    The wizard prompts you for three things:
+
+    ```
+    ? Project name:  › my-rwa-project
+    ? Network:       › polygon-amoy
+    ? Private key:   › (stored in .env, never in config)
+    ```
+
+    After the wizard completes, your project directory looks like this:
+
+    ```
+    my-rwa-project/
+    ├── ankara.config.json   ← network settings and deployment addresses
+    └── .env                 ← PRIVATE_KEY (gitignored automatically)
+    ```
+
+    The generated `ankara.config.json` starts with just the network set:
+
+    ```json
+    {
+      "version": "1.0",
+      "network": "polygon-amoy",
+      "deployments": []
+    }
+    ```
+
+    <Note>
+      `ankara init` writes `PRIVATE_KEY=` to `.env` and adds `.env` to `.gitignore`. Confirm `.gitignore` exists and contains `.env` before committing anything.
+    </Note>
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Deploy the Token Factory">
+    The on-chain `TokenFactory` contract must be deployed once per network before you can issue tokens. It acts as a registry and deployment hub for all asset tokens you create.
 
     ```bash
-    your-cli start
+    npx ankara deploy-factory
     ```
+
+    The CLI reads your `PRIVATE_KEY` from `.env`, deploys the factory contract to Polygon Amoy, and writes the resulting address back to `ankara.config.json`:
+
+    ```json
+    {
+      "version": "1.0",
+      "network": "polygon-amoy",
+      "factoryAddress": "0xAbc...123",
+      "deployments": []
+    }
+    ```
+
+    <Note>
+      You only run `deploy-factory` once. After the factory address is saved in `ankara.config.json`, all subsequent `ankara deploy` and `ankara mint` commands read that address automatically.
+    </Note>
+  </Step>
+
+  <Step title="Deploy a token">
+    With the factory deployed, you can now issue your first RWA token. Run the interactive deploy wizard:
+
+    ```bash
+    npx ankara deploy
+    ```
+
+    The wizard walks you through selecting an asset template and filling in the asset-specific metadata. Here is an example session deploying a tokenized farmland parcel in Kano State, Nigeria:
+
+    ```
+    ? Asset template:  › Farmland — agricultural land tokenization
+    ? Token name:      › Kano Farmland Token
+    ? Token symbol:    › KFT
+    ? Asset ID:        › KANO-FARM-001
+    ? Country code:    › NG
+    ? GPS location:    › 12.0022, 8.5919
+    ? Area (sq m):     › 10000
+    ? Soil type:       › loam
+    ? Irrigation:      › rain-fed
+    ? Crop history:    › maize,sorghum,fallow
+    ? Valuation USD:   › 50000
+    ? State/region:    › Kano State
+    ...
+    ✓ FarmlandToken deployed: 0x4Ac9...dB2F
+    ✓ Saved to ankara.config.json
+    ```
+
+    The six available asset templates are: **Farmland**, **Commodity**, **Real Estate**, **Invoice**, **Carbon Credit**, and **Mining Rights**. Each template has its own metadata schema — see [Asset Templates](/concepts/asset-templates) for the full field reference.
+  </Step>
+
+  <Step title="Mint tokens">
+    Mint fractional shares of the deployed asset to an investor address:
+
+    ```bash
+    npx ankara mint
+    ```
+
+    The CLI prompts you to select the deployed token (from `ankara.config.json`), enter the recipient address, and specify the amount to mint. Token amounts use 18 decimal places by default, matching the ERC-20 standard.
+
+    <Tip>
+      To mint programmatically from your application code, use the `AssetRegistry` class from `@ankarachain/sdk` or call the `mint` method directly on the deployed ERC-20 contract via ethers.js.
+    </Tip>
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+---
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+## Using the SDK Directly
+
+The CLI is a wrapper around the `@ankarachain/sdk` TypeScript API. For programmatic use in your application — server-side deployment scripts, backend APIs, or automated workflows — use the SDK directly:
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+import { ethers } from "ethers";
+
+const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+const signer   = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+
+const factory = new TokenFactory({
+  network:        "polygon-amoy",
+  signer,
+  factoryAddress: "0xYourFactoryAddress",
+});
+
+const result = await factory.deployFarmland({
+  name:        "Kano Farmland Token",
+  symbol:      "KFT",
+  assetId:     "KANO-FARM-001",
+  countryCode: "NG",
+  metadata: {
+    location:          "12.0022, 8.5919",
+    areaSqMeters:      BigInt(10000),
+    soilType:          "loam",
+    irrigationType:    "rain-fed",
+    cropHistory:       "maize,sorghum,fallow",
+    titleDocumentHash: ethers.ZeroHash,
+    valuationUSD:      ethers.parseEther("50000"),
+    stateRegion:       "Kano State",
+    lastUpdated:       BigInt(Math.floor(Date.now() / 1000)),
+  },
+});
+
+console.log("Deployed:", result.tokenAddress);
+// → 0x4Ac9...dB2F
+```
+
+The `deployFarmland()` call returns a `DeployResult` object:
+
+```typescript
+interface DeployResult {
+  tokenAddress: string;   // deployed ERC-20 contract address
+  txHash:       string;   // deployment transaction hash
+  assetId:      string;   // the assetId you passed in
+  template:     AssetTemplate;
+  network:      SupportedNetwork;
+  deployedAt:   number;   // unix timestamp
+}
+```
+
+The `TokenFactory` constructor accepts a `factoryAddress` override. If you omit it, the adapter uses the default factory address for the network — useful once Ankara Chain ships mainnet factory deployments. You can also pass `rpcUrl` to override the default RPC endpoint, or `provider` if you already have an ethers `Provider` instance in scope.
+
+---
+
+## React Hooks
+
+The `@ankarachain/sdk/react` entry point exports React hooks that wrap the SDK for use in front-end applications. Import from the separate entry point to avoid pulling React into server-side bundles:
+
+```tsx
+import { useAsset, useTokenBalance } from "@ankarachain/sdk/react";
+
+export function Portfolio({
+  contractAddress,
+  walletAddress,
+}: {
+  contractAddress: string;
+  walletAddress: string;
+}) {
+  const { asset, loading } = useAsset(contractAddress);
+  const { balance }        = useTokenBalance(walletAddress);
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div>
+      <h2>{asset.name}</h2>
+      <p>Your shares: <strong>{balance}</strong></p>
+      <p>Status: {asset.status}</p>
+    </div>
+  );
+}
+```
+
+The hooks handle provider setup, subscription to on-chain events, and re-rendering when token state changes — so your component always reflects current on-chain data without manual polling.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Stellar Quickstart" icon="star" href="/quickstart-stellar">
+    Deploy the same token on Stellar Soroban testnet using the unified SDK API.
+  </Card>
+  <Card title="Asset Templates" icon="layer-group" href="/concepts/asset-templates">
+    Explore full metadata schemas for all six asset classes.
+  </Card>
+  <Card title="CLI Commands" icon="terminal" href="/cli/commands">
+    Full reference for every `ankara` command and flag.
+  </Card>
+  <Card title="TokenFactory SDK" icon="code" href="/sdk/token-factory">
+    Programmatic deploy API with full TypeScript type signatures.
+  </Card>
+</CardGroup>

@@ -1,0 +1,762 @@
+---
+title: "ankara CLI Command Reference"
+sidebarTitle: "Commands"
+description: "Full reference for every ankara CLI command — flags, arguments, and example output for init, deploy, mint, escrow, ramp, and more."
+---
+
+Every `ankara` command reads `ankara.config.json` from your current working directory and signing credentials from `.env`. Run `ankara init` once in a new project before using any other command. Commands marked **read-only** do not require a private key — they query the chain directly.
+
+---
+
+## Project Setup
+
+### `ankara init [project-name]`
+
+Scaffolds a new Ankara Chain project in your current directory. The wizard prompts you for a network, an optional factory address, and an optional custom RPC URL, then writes `ankara.config.json` and a `.env` stub.
+
+```bash
+ankara init
+ankara init my-rwa-project
+```
+
+**Interactive prompts**
+
+| Prompt | Default | Description |
+|---|---|---|
+| Project name | `my-ankara-project` | Human label stored in the config |
+| Target network | `polygon-amoy` | One of: `polygon-amoy`, `localhost`, `polygon`, `celo`, `bnb`, `ethereum`, `stellar-testnet`, `stellar` |
+| TokenFactory address | _(blank)_ | Paste an existing address, or leave blank and run `deploy-factory` next |
+| Custom RPC URL | _(blank)_ | Overrides the SDK built-in endpoint for this network |
+
+**Example output**
+
+```
+  🌍  Ankara Chain SDK — Project Setup
+  ────────────────────────────────────────
+
+  ✔ Initialised: my-rwa-project
+  Network:         polygon-amoy
+  Factory address: (not set — deploy first)
+  Config file:     ankara.config.json
+
+  Next steps:
+    1. Add your PRIVATE_KEY to .env
+    2. Deploy the factory:  npx ankara deploy-factory
+    3. Deploy a token:      npx ankara deploy --template farmland
+```
+
+<Note>
+If `ankara.config.json` already exists, the wizard asks whether to reinitialise. Your existing `deployments` array is preserved.
+</Note>
+
+---
+
+### `ankara deploy-factory`
+
+Prints the Hardhat (EVM) or Stellar CLI commands you need to run in order to deploy the full Ankara Chain contract suite — `TokenFactory`, `NFTFactory`, `MultiTokenFactory`, `EscrowFactory`, `RampSettlementFactory`, and `FactoryRegistry` — to the configured network.
+
+```bash
+ankara deploy-factory
+```
+
+**Example output (EVM)**
+
+```
+  🏭  Deploy TokenFactory
+  ────────────────────────────────────────
+
+  Network:  polygon-amoy
+  Deployer: 0xYourWalletAddress
+  Balance:  0.42 MATIC
+
+  ⚠ This command deploys the full Ankara Chain contract suite.
+  ⚠ Make sure your wallet has enough gas.
+
+  To deploy contracts, run the Hardhat deploy script from packages/contracts-evm:
+
+    cd packages/contracts-evm
+    npx hardhat run scripts/deploy.ts --network amoy
+
+  Then paste the TokenFactory address back into ankara.config.json
+  or re-run: npx ankara init
+```
+
+<Note>
+After the Hardhat script completes, copy the printed `TokenFactory` address into `ankara.config.json` as `"factoryAddress"` before running `ankara deploy`.
+</Note>
+
+---
+
+## Token Deployment
+
+### `ankara deploy`
+
+Interactive wizard that deploys an ERC-20 RWA token through your configured `TokenFactory`. Prompts you to choose a template and fill in all asset-specific metadata fields. The deployed address is saved automatically to `ankara.config.json`.
+
+```bash
+ankara deploy
+ankara deploy --template farmland
+```
+
+<ParamField query="--template" type="string">
+  Skip the template selection prompt. Accepted values: `farmland`, `commodity`, `real-estate`, `invoice`, `carbon-credit`, `mining-rights`.
+</ParamField>
+
+**Template-specific metadata fields**
+
+<CodeGroup>
+
+```text farmland
+GPS location         e.g. 12.0022, 8.5919
+Area (sq metres)
+Soil type            e.g. loam, clay, sandy
+Irrigation type      e.g. rain-fed, drip
+Crop history         e.g. maize,sorghum,fallow
+State / Region       e.g. Kano State
+Valuation USD
+```
+
+```text commodity
+Commodity type       e.g. maize, cocoa
+Quantity (kg)
+Grade classification e.g. Grade A
+Warehouse ID
+Warehouse location
+Harvest season       e.g. 2025/2026
+Valuation USD
+```
+
+```text real-estate
+Property ID
+Property type        Residential | Commercial | Industrial | Land
+Location address
+Total area (sq m)
+Occupancy status     Vacant | Owner-occupied | Tenanted
+Rental yield (bps)   e.g. 600 = 6%
+Valuation USD
+```
+
+```text invoice
+Invoice number
+Debtor reference
+Face value USD
+Discount rate (bps)  e.g. 200 = 2%
+Days until due
+Currency (ISO 4217)  e.g. USD, NGN
+```
+
+```text carbon-credit
+Credit type          REDD+ | VCS | Gold Standard | GS4GG | CDM
+Verification body ref
+Vintage year
+Quantity CO2e (t)
+Project location
+Project type         Forestry | Agriculture | Energy | Waste
+```
+
+```text mining-rights
+License number
+Mineral type         Gold | Coltan | Copper | Diamond | Coal | Lithium
+Concession area
+Area (hectares)
+License expiry (days from now)
+Issuing authority
+Royalty rate (bps)   e.g. 300 = 3%
+```
+
+</CodeGroup>
+
+**Example output**
+
+```
+  🚀  Deploy RWA Token
+  ────────────────────────────────────────
+
+  Template:  farmland
+  Name:      Kano Farmland Token
+  Symbol:    KFT
+  Asset ID:  FARMLAND-001
+  Country:   NG
+  Network:   polygon-amoy
+
+  ✔ Token deployed!
+
+  Token address: 0xDeAdBeEf00000000000000000000000000000001
+  Tx hash:       0xabc123def456...
+  Network:       polygon-amoy
+
+  View on explorer: https://amoy.polygonscan.com/address/0xDeAdBeEf...
+  Saved to ankara.config.json
+```
+
+---
+
+### `ankara deploy-nft`
+
+Deploys an ERC-721 NFT contract representing a single unique asset record. Use this alongside — or instead of — ERC-20 fungible tokens when your asset is a one-of-a-kind deed, title, or certificate.
+
+```bash
+ankara deploy-nft
+```
+
+**Supported templates**
+
+| Value | Description |
+|---|---|
+| `farmland-nft` | Unique land parcel deed |
+| `real-estate-nft` | Unique property title |
+| `mining-rights-nft` | Unique mining license |
+| `commodity-vault-nft` | Certified warehouse receipt |
+
+<Note>
+Your `ankara.config.json` must contain an `"nftFactoryAddress"` field pointing to a deployed `NFTFactory` contract before you can use this command.
+</Note>
+
+**Example output**
+
+```
+  🖼️  Deploy NFT Asset Record
+  ────────────────────────────────────────
+
+  Template    : farmland-nft
+  Name        : Kano North Parcel
+  Symbol      : KNP
+  Asset ID    : FARMLAND-NFT-001
+  Country     : NG
+  Network     : polygon-amoy
+
+  ✔ NFT contract deployed!
+  NFT Address : 0xNftContractAddress...
+  Tx Hash     : 0xabc123...
+```
+
+---
+
+### `ankara deploy-batch`
+
+Deploys a `CommodityBatchToken` (ERC-1155) contract — a multi-token warehouse receipt where each token ID represents a distinct commodity batch stored in the same facility.
+
+```bash
+ankara deploy-batch
+```
+
+**Interactive prompts**
+
+| Prompt | Description |
+|---|---|
+| Collection name | Human-readable name for the warehouse contract |
+| Country code | ISO 3166-1 alpha-2 |
+| Base IPFS URI | Metadata URI prefix, e.g. `ipfs://Qm.../` |
+| Warehouse ID | Unique identifier for the storage facility |
+| Warehouse location | Human-readable address |
+
+<Note>
+Requires a `"multiTokenFactoryAddress"` in `ankara.config.json`.
+</Note>
+
+---
+
+### `ankara deploy-pool`
+
+Deploys a `PoolVault` — an ERC-20 fund contract that accepts multiple underlying RWA token addresses as collateral and issues pool shares to depositors.
+
+```bash
+ankara deploy-pool
+```
+
+**Interactive prompts**
+
+| Prompt | Description |
+|---|---|
+| Pool name | ERC-20 name for the vault shares |
+| Pool symbol | ERC-20 symbol for the vault shares |
+| Asset ID | Unique string identifier |
+| Country code | ISO 3166-1 alpha-2 |
+| Oracle address | Optional `ManualOracle` address for on-chain pricing |
+| Management fee (bps) | Annual fee in basis points, e.g. `100` = 1% (default `0`) |
+
+---
+
+## Token Operations
+
+### `ankara mint`
+
+Mints ERC-20 tokens to a recipient address. If you have only one deployment in your config, the CLI uses it automatically; otherwise it presents a selection list.
+
+```bash
+ankara mint
+ankara mint --contract 0xTokenAddress --to 0xRecipient --amount 5000
+```
+
+<ParamField query="--contract" type="string">
+  Token contract address. Skips the interactive selection prompt.
+</ParamField>
+
+<ParamField query="--to" type="string">
+  Recipient wallet address (EVM or Stellar, depending on configured network).
+</ParamField>
+
+<ParamField query="--amount" type="string">
+  Number of tokens to mint, in whole units (e.g. `"1000"`). Default: `"1000"`.
+</ParamField>
+
+**Example output**
+
+```
+  🪙  Mint Tokens
+  ────────────────────────────────────────
+
+  Contract: 0xDeAdBeEf00000000000000000000000000000001
+  To:       0xRecipient0000000000000000000000000000001
+  Amount:   5000 tokens
+
+  ✔ Minted!
+  Tx hash: 0xabc123def456...
+  Explorer: https://amoy.polygonscan.com/tx/0xabc123...
+```
+
+---
+
+### `ankara batch-mint`
+
+Mints ERC-1155 commodity batch tokens to a single recipient. Use this to issue warehouse receipt shares for a specific batch ID on a deployed `CommodityBatchToken` contract.
+
+```bash
+ankara batch-mint
+```
+
+**Interactive prompts**
+
+| Prompt | Description |
+|---|---|
+| CommodityBatchToken address | The ERC-1155 contract to mint on |
+| Batch ID | Token ID representing the commodity batch (integer) |
+| Recipient address | Wallet that receives the tokens |
+| Amount | Number of tokens to mint |
+
+**Example output**
+
+```
+  🪙  Mint Commodity Batch Tokens (ERC-1155)
+  ────────────────────────────────────────
+
+  ✔ Minted 500 tokens (batch 3) to 0xRecipient...
+  Tx hash: 0xabc123...
+```
+
+---
+
+### `ankara transfer`
+
+Transfers ERC-20 RWA tokens from your deployer wallet to another address.
+
+```bash
+ankara transfer
+```
+
+**Interactive prompts**: contract address, recipient address, amount.
+
+---
+
+### `ankara status`
+
+Queries an Ankara Chain token contract and prints its on-chain metadata. If you omit the address, the command lists every deployment recorded in `ankara.config.json`. This command is **read-only** — no private key is needed.
+
+```bash
+ankara status
+ankara status 0xTokenAddress
+```
+
+**Example output**
+
+```
+  📋  Asset Status
+  ────────────────────────────────────────
+
+  Name:             Kano Farmland Token
+  Symbol:           KFT
+  Address:          0xDeAdBeEf...
+  Country:          NG
+  Status:           ACTIVE
+  Valuation USD:    50000.0
+  Metadata version: 1
+```
+
+Asset lifecycle statuses: `DRAFT` → `ACTIVE` → `SUSPENDED` → `REDEEMED` / `EXPIRED`.
+
+---
+
+### `ankara register-batch`
+
+Registers a new commodity batch on an existing `CommodityBatchToken` (ERC-1155) contract, assigning it a token ID and storing its metadata on-chain.
+
+```bash
+ankara register-batch
+```
+
+**Interactive prompts**: contract address, commodity type, quantity (kg), grade, warehouse details, expiry date.
+
+---
+
+## Escrow
+
+Ankara Chain's milestone escrow supports tranche-based payments — a common pattern for diaspora remittances and construction financing. Funds are held in a smart contract and released only when each milestone is marked delivered and approved.
+
+### `ankara deploy-escrow`
+
+Deploys a `MilestoneEscrow` contract. You define the number of milestones and the token amount for each one at deploy time. The total amount (sum of all milestones) must later be deposited by the payer via `ankara escrow-fund`.
+
+```bash
+ankara deploy-escrow
+```
+
+**Interactive prompts**
+
+| Prompt | Description |
+|---|---|
+| Payer address | Diaspora buyer who funds the escrow |
+| Payee address | Recipient of released milestone funds |
+| Arbiter address | Optional neutral party for dispute resolution; leave blank for none |
+| Stablecoin address | ERC-20 token used for payments (must be whitelisted on the `EscrowFactory`) |
+| Timelock (days) | Days before a delivered milestone can be force-released if the payer is unresponsive. Default: `7` |
+| Number of milestones | Integer |
+| Per-milestone amount | Amount in whole token units, one prompt per milestone |
+| Per-milestone description | Free-text label (hashed on-chain) |
+
+**Example output**
+
+```
+  🤝  Deploy Milestone Escrow
+  ────────────────────────────────────────
+
+  Payer       : 0xPayerAddress...
+  Payee       : 0xPayeeAddress...
+  Arbiter     : none
+  Token       : 0xStablecoinAddress...
+  Milestones  : 3 (total 300.0)
+  Timelock    : 7 days
+  Network     : polygon-amoy
+
+  ✔ Escrow deployed: 0xEscrowAddress...
+  Tx hash : 0xabc123...
+  Saved to ankara.config.json
+
+  Next: the payer approves the stablecoin and runs "ankara escrow-fund"
+```
+
+---
+
+### `ankara escrow-fund`
+
+Approves the stablecoin allowance and deposits the full agreed amount into the escrow contract. Only the payer should run this command.
+
+```bash
+ankara escrow-fund
+```
+
+**Prompt**: Escrow contract address.
+
+**Example output**
+
+```
+  💰  Fund Milestone Escrow
+  ────────────────────────────────────────
+
+  ✔ Escrow funded with 300.0 tokens
+  Tx hash: 0xabc123...
+```
+
+---
+
+### `ankara escrow-deliver`
+
+Marks a milestone as delivered. Only the payee should run this command after completing the work for a given milestone.
+
+```bash
+ankara escrow-deliver
+```
+
+**Prompts**: escrow address, milestone ID (0-indexed).
+
+**Example output**
+
+```
+  📦  Mark Milestone Delivered
+  ────────────────────────────────────────
+
+  ✔ Milestone 0 marked delivered
+  Tx hash: 0xabc123...
+  The payer can now run "ankara escrow-approve" to release funds.
+```
+
+---
+
+### `ankara escrow-approve`
+
+Approves a delivered milestone and releases its funds to the payee. Only the payer should run this command.
+
+```bash
+ankara escrow-approve
+```
+
+**Prompts**: escrow address, milestone ID (0-indexed).
+
+**Example output**
+
+```
+  ✅  Approve Milestone (releases funds)
+  ────────────────────────────────────────
+
+  ✔ Milestone 0 approved — funds released to payee
+  Tx hash: 0xabc123...
+```
+
+---
+
+### `ankara escrow-dispute`
+
+Raises a dispute on a delivered milestone, blocking the release of funds until the arbiter resolves it. Either the payer or the payee may raise a dispute.
+
+```bash
+ankara escrow-dispute
+```
+
+**Prompts**: escrow address, milestone ID.
+
+---
+
+### `ankara escrow-resolve`
+
+Resolves a disputed milestone. Only the arbiter designated at deployment can run this command. You choose whether to release the funds to the payee or refund them to the payer.
+
+```bash
+ankara escrow-resolve
+```
+
+**Prompts**: escrow address, milestone ID, release to payee (yes/no).
+
+---
+
+### `ankara escrow-claim-timelock`
+
+Force-releases a delivered milestone to the payee after the configured timelock period has elapsed with no dispute raised. This can be called by any address — it is a safety valve for unresponsive payers.
+
+```bash
+ankara escrow-claim-timelock
+```
+
+**Prompts**: escrow address, milestone ID.
+
+---
+
+### `ankara escrow-status`
+
+Reads the full state of an escrow contract — parties, balances, and per-milestone status — without requiring a private key.
+
+```bash
+ankara escrow-status
+```
+
+**Prompts**: escrow address.
+
+**Milestone status values**: `PENDING` → `DELIVERED` → `RELEASED` / `DISPUTED` → `REFUNDED`.
+
+---
+
+## Fiat Ramp
+
+<Note>
+All ramp commands use `ManualRampProvider` — a reference implementation that returns simulated data. For production, inject a real provider adapter (Yellow Card, Flutterwave, Transak, etc.) at the SDK level before running the CLI.
+</Note>
+
+### `ankara ramp-quote`
+
+Gets a fiat-to-token or token-to-fiat exchange quote for a given currency pair and country.
+
+```bash
+ankara ramp-quote
+```
+
+**Interactive prompts**
+
+| Prompt | Example |
+|---|---|
+| Direction | `on-ramp` or `off-ramp` |
+| Fiat currency | `NGN`, `KES`, `GHS` |
+| Token symbol | `mUSD` |
+| Country code | `NG`, `KE`, `GH` |
+| Amount is in | `fiat` or `token` |
+| Amount | `1500` |
+
+**Example output**
+
+```
+  💱  Ramp Quote
+  ────────────────────────────────────────
+
+  Direction     : on-ramp
+  Fiat amount   : 1500 NGN
+  Token amount  : 1.00 mUSD
+  Exchange rate : 1500
+  Fee (fiat)    : 15 NGN
+  Expires at    : 2025-06-01T12:00:00.000Z
+```
+
+---
+
+### `ankara onramp-initiate`
+
+Starts an on-ramp session (fiat → tokens) with the ramp provider. Returns a session ID and payment URL. This command does **not** mint tokens — you must mint them separately once your backend confirms the fiat payment via the provider webhook.
+
+```bash
+ankara onramp-initiate
+```
+
+**Prompts**: fiat amount, fiat currency, token symbol, recipient wallet address, country code.
+
+**Example output**
+
+```
+  🟢  Initiate On-Ramp (fiat → tokens)
+  ────────────────────────────────────────
+
+  Session ID   : sess_abc123
+  Status       : pending
+  Payment URL  : https://pay.provider.example/sess_abc123
+
+  Next: once the payer completes the fiat payment, mint the recipient's tokens,
+  then run: ankara onramp-record --reference sess_abc123
+```
+
+---
+
+### `ankara offramp-initiate`
+
+Starts an off-ramp session (tokens → fiat). Approves the `RampSettlement` contract to spend the specified token amount, deposits the tokens into custody, and initiates a fiat payout session with the provider.
+
+```bash
+ankara offramp-initiate
+```
+
+**Interactive prompts**
+
+| Prompt | Description |
+|---|---|
+| RampSettlement contract address | Your deployed settlement contract |
+| Token contract address | The ERC-20 token to sell |
+| Amount | Whole token units to off-ramp |
+| Fiat currency | e.g. `NGN`, `KES` |
+| Payout account number | Bank account or mobile money number |
+| Bank code | Leave blank for mobile money |
+| Country code | ISO 3166-1 alpha-2 |
+
+**Example output**
+
+```
+  🔴  Initiate Off-Ramp (tokens → fiat)
+  ────────────────────────────────────────
+
+  ✔ Off-ramp initiated — 100.0 tokens deposited in custody
+  Reference : sess_def456
+  Tx hash   : 0xabc123...
+  Next: once the fiat payout completes, run "ankara offramp-confirm" (SETTLER_ROLE).
+  If the payout fails instead, run "ankara offramp-refund" (MANAGER_ROLE).
+```
+
+---
+
+### `ankara offramp-confirm`
+
+Confirms that the fiat payout was successfully delivered to the recipient, releasing the custodied tokens to the settlement treasury. Requires `SETTLER_ROLE` on the `RampSettlement` contract.
+
+```bash
+ankara offramp-confirm
+```
+
+**Prompts**: settlement contract address, session reference ID.
+
+---
+
+### `ankara offramp-refund`
+
+Refunds custodied tokens back to the original depositor when a fiat payout fails. Requires `MANAGER_ROLE` on the `RampSettlement` contract.
+
+```bash
+ankara offramp-refund
+```
+
+**Prompts**: settlement contract address, session reference ID.
+
+---
+
+### `ankara ramp-status`
+
+Reads the on-chain record for an off-ramp deposit or on-ramp attestation by reference ID. **Read-only** — no private key required.
+
+```bash
+ankara ramp-status
+```
+
+**Prompts**: settlement contract address, reference ID.
+
+---
+
+### `ankara deploy-ramp-settlement`
+
+Deploys a `RampSettlement` contract — the on-chain custody component of the fiat off-ramp flow. The treasury address you provide receives settled tokens after each confirmed payout.
+
+```bash
+ankara deploy-ramp-settlement
+```
+
+**Prompts**: treasury address.
+
+---
+
+### `ankara onramp-record`
+
+Records an on-chain attestation that an on-ramp mint has occurred, linking the mint to a provider session reference. This does **not** move funds — mint the recipient's tokens first, then call this command.
+
+```bash
+ankara onramp-record
+```
+
+**Prompts**: settlement contract address, reference string, recipient address, token address, amount minted.
+
+---
+
+## Oracle & Collateral
+
+### `ankara oracle-set`
+
+Pushes a new price value to your deployed `ManualOracle` contract. Use this in development and testing; production deployments should use an automated price feed.
+
+```bash
+ankara oracle-set
+```
+
+**Prompts**: oracle contract address, asset identifier, price (in USD, scaled to 18 decimals).
+
+---
+
+### `ankara deposit`
+
+Deposits tokens into a `PoolVault` as collateral, receiving vault shares in return.
+
+```bash
+ankara deposit
+```
+
+**Prompts**: pool vault address, token address to deposit, amount.
+
+---
+
+### `ankara pool-status`
+
+Reads the current state of a `PoolVault` — total assets, share price, management fee accrual, and collateral breakdown. **Read-only**.
+
+```bash
+ankara pool-status
+```
+
+**Prompts**: pool vault address.

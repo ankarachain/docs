@@ -1,0 +1,310 @@
+---
+title: "IndexerClient: Query On-Chain Events and Manage Webhooks"
+sidebarTitle: "IndexerClient"
+description: "IndexerClient queries a running Ankara Chain indexer service for on-chain events and manages webhook subscriptions for real-time contract event delivery."
+---
+
+`IndexerClient` is a thin HTTP client for a running `@ankarachain/indexer` service. It does not communicate with any blockchain directly — the indexer service handles chain polling and event normalization in the background. You use `IndexerClient` to query the event history it has indexed, and to manage webhook subscriptions that deliver new events to your application in real time.
+
+## Import
+
+```typescript
+import { IndexerClient } from "@ankarachain/sdk";
+```
+
+---
+
+## Constructor
+
+```typescript
+new IndexerClient(baseUrl: string)
+```
+
+<ParamField path="baseUrl" type="string" required>
+  The base URL of the running `@ankarachain/indexer` service, e.g. `"http://localhost:4100"` or `"https://indexer.myapp.com"`. A trailing slash is stripped automatically.
+</ParamField>
+
+```typescript
+import { IndexerClient } from "@ankarachain/sdk";
+
+const indexer = new IndexerClient("http://localhost:4100");
+```
+
+---
+
+## Methods
+
+### `queryEvents`
+
+```typescript
+queryEvents(filter?: EventQueryFilter): Promise<IndexedEvent[]>
+```
+
+Queries the indexer for on-chain events matching the given filter. Returns events oldest-first. Omitting `filter` (or passing an empty object) returns all indexed events up to the default `limit`.
+
+<ParamField path="filter.contract" type="string">
+  Filter to events emitted by a specific contract address.
+</ParamField>
+
+<ParamField path="filter.type" type="string">
+  Filter by event type name, e.g. `"opened"`, `"liquidat"`, `"delivered"`. Partial string matching may vary by indexer configuration.
+</ParamField>
+
+<ParamField path="filter.since" type="number">
+  Unix timestamp — only return events with `timestamp >= since`.
+</ParamField>
+
+<ParamField path="filter.limit" type="number">
+  Maximum number of events to return. The indexer may cap this at its own configured maximum.
+</ParamField>
+
+**Returns:** `Promise<IndexedEvent[]>`
+
+<ResponseField name="id" type="string">
+  Unique event identifier assigned by the indexer.
+</ResponseField>
+
+<ResponseField name="contract" type="string">
+  Address of the contract that emitted the event.
+</ResponseField>
+
+<ResponseField name="eventType" type="string">
+  Normalized event type string, e.g. `"opened"`, `"funded"`, `"liquidated"`.
+</ResponseField>
+
+<ResponseField name="ledger" type="number">
+  Ledger number (Stellar) or block number (EVM) the event was included in.
+</ResponseField>
+
+<ResponseField name="txHash" type="string">
+  Transaction hash of the transaction that emitted the event.
+</ResponseField>
+
+<ResponseField name="timestamp" type="number">
+  Unix timestamp of the ledger/block.
+</ResponseField>
+
+<ResponseField name="data" type="unknown">
+  Event-specific decoded payload. Shape varies by event type — see the indexer service documentation for per-event schemas.
+</ResponseField>
+
+```typescript
+// All events for a specific vault contract
+const events = await indexer.queryEvents({
+  contract: vaultContractId,
+  limit:    50,
+});
+
+// Loan-open events from the last 24 hours
+const since = Math.floor(Date.now() / 1000) - 86_400;
+const openEvents = await indexer.queryEvents({
+  contract: vaultContractId,
+  type:     "opened",
+  since,
+});
+
+openEvents.forEach(e => {
+  console.log(`Loan opened in tx ${e.txHash} at ledger ${e.ledger}`);
+  console.log("Event data:", e.data);
+});
+```
+
+---
+
+### `registerWebhook`
+
+```typescript
+registerWebhook(url: string, events: string[]): Promise<RegisteredWebhook>
+```
+
+Registers a new webhook subscription. The indexer will `POST` a JSON payload to `url` whenever any of the specified event types are indexed. The response includes a `secret` field — **store it immediately**, as it is shown only once and never returned again by `listWebhooks()`.
+
+<ParamField path="url" type="string" required>
+  The HTTPS endpoint to deliver event payloads to, e.g. `"https://myapp.com/hooks/ankara"`.
+</ParamField>
+
+<ParamField path="events" type="string[]" required>
+  Array of event type names to subscribe to, e.g. `["opened", "liquidated"]`. Pass `["*"]` to subscribe to all event types.
+</ParamField>
+
+**Returns:** `Promise<RegisteredWebhook>`
+
+<ResponseField name="id" type="string">
+  Unique webhook ID. Use this to delete the webhook later.
+</ResponseField>
+
+<ResponseField name="url" type="string">
+  The delivery URL as registered.
+</ResponseField>
+
+<ResponseField name="events" type="string[]">
+  The event type list as registered.
+</ResponseField>
+
+<ResponseField name="secret" type="string">
+  A signing secret shown **exactly once at registration time**. The indexer includes this in an `X-Ankara-Signature` header on every delivery so you can verify the payload's authenticity. Store it securely — it is not returned by `listWebhooks()`.
+</ResponseField>
+
+<ResponseField name="createdAt" type="number">
+  Unix timestamp of webhook creation.
+</ResponseField>
+
+```typescript
+const webhook = await indexer.registerWebhook(
+  "https://myapp.com/hooks/ankara",
+  ["opened", "liquidated", "funded", "delivered"]
+);
+
+// Store the secret — you won't see it again!
+await db.saveWebhookSecret(webhook.id, webhook.secret!);
+console.log("Webhook ID:", webhook.id);
+```
+
+<Warning>
+  The `secret` field is returned **only** in the response from `registerWebhook()`. It is absent from all subsequent calls, including `listWebhooks()`. If you lose it, you must delete and re-register the webhook.
+</Warning>
+
+---
+
+### `listWebhooks`
+
+```typescript
+listWebhooks(): Promise<RegisteredWebhook[]>
+```
+
+Returns all registered webhooks. The `secret` field is **not** included in this response — only the `id`, `url`, `events`, and `createdAt` fields are returned.
+
+```typescript
+const webhooks = await indexer.listWebhooks();
+webhooks.forEach(wh => {
+  console.log(`${wh.id}: ${wh.url} — watching: ${wh.events.join(", ")}`);
+});
+```
+
+---
+
+### `removeWebhook`
+
+```typescript
+removeWebhook(webhookId: string): Promise<boolean>
+```
+
+Deletes a registered webhook by its ID. Returns `true` if the webhook was successfully removed.
+
+<ParamField path="webhookId" type="string" required>
+  The `id` of the webhook to remove, as returned by `registerWebhook()` or `listWebhooks()`.
+</ParamField>
+
+```typescript
+const removed = await indexer.removeWebhook("wh_abc123");
+console.log("Removed:", removed); // true
+```
+
+---
+
+## Full Example
+
+```typescript
+import { IndexerClient } from "@ankarachain/sdk";
+
+const indexer = new IndexerClient("https://indexer.myapp.com");
+
+// ── Query recent escrow events ───────────────────────────────────────────
+const escrowEvents = await indexer.queryEvents({
+  contract: escrowContractAddress,
+  since:    Math.floor(Date.now() / 1000) - 7 * 86_400, // last 7 days
+  limit:    100,
+});
+
+console.log(`Found ${escrowEvents.length} escrow events`);
+
+// ── Register a webhook for vault liquidations ────────────────────────────
+const webhook = await indexer.registerWebhook(
+  "https://myapp.com/api/hooks/vault-alerts",
+  ["liquidated", "opened"]
+);
+
+// Store the secret securely for signature verification
+process.env.WEBHOOK_SECRET = webhook.secret!;
+console.log("Webhook registered:", webhook.id);
+
+// ── List all webhooks ────────────────────────────────────────────────────
+const all = await indexer.listWebhooks();
+console.log("Active webhooks:", all.length);
+
+// ── Clean up a webhook ───────────────────────────────────────────────────
+await indexer.removeWebhook(webhook.id);
+```
+
+---
+
+## Webhook Payload Verification
+
+The indexer signs every delivery with a `X-Ankara-Signature` header. Verify it in your webhook handler using the `secret` you saved at registration time.
+
+```typescript
+import crypto from "crypto";
+
+function verifyWebhookSignature(
+  rawBody: string,
+  signature: string,
+  secret: string
+): boolean {
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(rawBody)
+    .digest("hex");
+
+  // Use timingSafeEqual to prevent timing attacks
+  return crypto.timingSafeEqual(
+    Buffer.from(`sha256=${expected}`),
+    Buffer.from(signature)
+  );
+}
+
+// Example Express handler
+app.post("/api/hooks/vault-alerts", express.raw({ type: "*/*" }), (req, res) => {
+  const signature = req.headers["x-ankara-signature"] as string;
+  const isValid   = verifyWebhookSignature(req.body.toString(), signature, secret);
+
+  if (!isValid) {
+    return res.status(401).send("Invalid signature");
+  }
+
+  const event = JSON.parse(req.body.toString());
+  console.log("Verified event:", event.eventType);
+  res.sendStatus(200);
+});
+```
+
+---
+
+## Type Reference
+
+```typescript
+interface EventQueryFilter {
+  contract?: string;   // Filter by contract address
+  type?:     string;   // Filter by event type name
+  since?:    number;   // Unix timestamp lower bound
+  limit?:    number;   // Max results to return
+}
+
+interface IndexedEvent {
+  id:        string;
+  contract:  string;
+  eventType: string;
+  ledger:    number;
+  txHash:    string;
+  timestamp: number;
+  data:      unknown;
+}
+
+interface RegisteredWebhook {
+  id:        string;
+  url:       string;
+  events:    string[];
+  /** Present only in the registerWebhook() response — not returned by listWebhooks(). */
+  secret?:   string;
+  createdAt: number;
+}
+```

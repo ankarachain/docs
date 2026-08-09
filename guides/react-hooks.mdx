@@ -1,0 +1,364 @@
+---
+title: "React Hooks for Ankara Chain Token Data"
+sidebarTitle: "React Hooks"
+description: "Use useAnkaraChain, useAsset, and useTokenBalance to display RWA token data and wallet balances in your React or Next.js application."
+---
+
+The Ankara Chain SDK ships its React bindings as a separate entry point — `@ankarachain/sdk/react` — so that importing the core SDK in a Node.js or server-side context never pulls React into your bundle. The hooks are all marked `"use client"` and are safe for React 18+ and Next.js App Router client components.
+
+---
+
+## Installation and import
+
+```bash
+npm install @ankarachain/sdk ethers
+```
+
+```typescript
+import {
+  useAnkaraChain,
+  useAsset,
+  useTokenBalance,
+} from "@ankarachain/sdk/react";
+```
+
+---
+
+## `useAnkaraChain(config)`
+
+`useAnkaraChain` initializes the SDK inside a React component. Pass your `AnkaraChainConfig` — the same config shape you'd pass to `new TokenFactory()` — and the hook returns a connected `factory` instance along with the signer's address, native balance, and connection state.
+
+```tsx
+import { useAnkaraChain } from "@ankarachain/sdk/react";
+import { useMemo } from "react";
+import { ethers } from "ethers";
+
+function App() {
+  // Build the signer outside the hook (e.g. from your wallet connection lib)
+  const signer = useMemo(() => {
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    return provider.getSigner();
+  }, []);
+
+  const { factory, address, balance, isConnected, isLoading, error } =
+    useAnkaraChain({
+      network:        "polygon-amoy",
+      factoryAddress: "0xYourFactoryAddress",
+      signer,          // ethers.js Signer from MetaMask / WalletConnect / etc.
+    });
+
+  if (isLoading)   return <p>Connecting…</p>;
+  if (error)       return <p>Error: {error.message}</p>;
+  if (!isConnected) return <p>Connect your wallet to continue.</p>;
+
+  return (
+    <div>
+      <p>Connected: {address}</p>
+      <p>Balance: {balance} MATIC</p>
+    </div>
+  );
+}
+```
+
+The hook re-runs automatically whenever `network`, `factoryAddress`, or the credential fields (`signer`, `stellarSecretKey`, `stellarSigner`) change, so wallet-switch events are handled without any extra wiring.
+
+`useAnkaraChain` returns:
+
+```typescript
+interface UseAnkaraChainReturn {
+  factory:     TokenFactory | null;  // null while loading or disconnected
+  address:     string | null;        // signer's address
+  balance:     string | null;        // native token balance (MATIC / ETH / XLM…)
+  isConnected: boolean;
+  isLoading:   boolean;
+  error:       Error | null;
+}
+```
+
+---
+
+## `useAsset(opts)`
+
+`useAsset` reads on-chain metadata for a single deployed token — no signer required. It builds a read-only adapter internally, so you can display asset data to unauthenticated users.
+
+```typescript
+function useAsset(opts: {
+  tokenAddress: string;
+  template:     AssetTemplate;   // "farmland" | "commodity" | "real-estate" | "invoice" | "carbon-credit" | "mining-rights"
+  network:      SupportedNetwork;
+  rpcUrl?:      string;
+}): UseAssetReturn
+```
+
+It returns:
+
+```typescript
+interface UseAssetReturn {
+  name:         string | null;
+  symbol:       string | null;
+  status:       AssetStatus | null;
+  countryCode:  string | null;
+  valuationUSD: bigint | null;   // null for templates without a valuation (invoice, carbon-credit, mining-rights)
+  version:      number | null;
+  metadata:     AnyAssetMetadata | null;
+  registry:     AssetRegistry | null;  // direct registry access for advanced reads
+  isLoading:    boolean;
+  error:        Error | null;
+  refresh:      () => void;            // re-fetch all data
+}
+```
+
+### Portfolio card component
+
+```tsx
+import { useAsset } from "@ankarachain/sdk/react";
+import { AssetStatus } from "@ankarachain/sdk";
+import { ethers } from "ethers";
+
+interface AssetCardProps {
+  tokenAddress: string;
+  template:     "farmland" | "commodity" | "real-estate" | "invoice" | "carbon-credit" | "mining-rights";
+}
+
+const STATUS_LABEL: Record<number, string> = {
+  [AssetStatus.DRAFT]:     "Draft",
+  [AssetStatus.ACTIVE]:    "Active",
+  [AssetStatus.SUSPENDED]: "Suspended",
+  [AssetStatus.REDEEMED]:  "Redeemed",
+  [AssetStatus.EXPIRED]:   "Expired",
+};
+
+export function AssetCard({ tokenAddress, template }: AssetCardProps) {
+  const { name, symbol, status, countryCode, valuationUSD, isLoading, error, refresh } =
+    useAsset({
+      tokenAddress,
+      template,
+      network: "polygon-amoy",
+    });
+
+  if (isLoading) {
+    return (
+      <div className="asset-card skeleton">
+        <p>Loading asset…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="asset-card error">
+        <p>Failed to load: {error.message}</p>
+        <button onClick={refresh}>Retry</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="asset-card">
+      <h3>{name} <span className="symbol">({symbol})</span></h3>
+
+      <dl>
+        <dt>Template</dt>     <dd>{template}</dd>
+        <dt>Country</dt>      <dd>{countryCode}</dd>
+        <dt>Status</dt>       <dd>{status !== null ? STATUS_LABEL[status] : "—"}</dd>
+
+        {valuationUSD !== null && (
+          <>
+            <dt>Valuation</dt>
+            <dd>${ethers.formatEther(valuationUSD)} USD</dd>
+          </>
+        )}
+      </dl>
+
+      <button onClick={refresh}>Refresh</button>
+    </div>
+  );
+}
+```
+
+---
+
+## `useTokenBalance(opts)`
+
+`useTokenBalance` reads a wallet's balance for any deployed Ankara Chain token — no signer required.
+
+```typescript
+function useTokenBalance(opts: {
+  tokenAddress:  string;
+  walletAddress: string;
+  network:       SupportedNetwork;
+  rpcUrl?:       string;
+}): UseTokenBalanceReturn
+```
+
+It returns:
+
+```typescript
+interface UseTokenBalanceReturn {
+  balance:   bigint | null;   // raw 18-decimal bigint
+  formatted: string | null;   // ethers.formatEther(balance)
+  isLoading: boolean;
+  error:     Error | null;
+  refresh:   () => void;
+}
+```
+
+### Usage
+
+```tsx
+import { useTokenBalance } from "@ankarachain/sdk/react";
+
+function InvestorBalance({
+  tokenAddress,
+  walletAddress,
+}: {
+  tokenAddress:  string;
+  walletAddress: string;
+}) {
+  const { formatted, isLoading, error } = useTokenBalance({
+    tokenAddress,
+    walletAddress,
+    network: "polygon-amoy",
+  });
+
+  if (isLoading) return <span>Loading balance…</span>;
+  if (error)     return <span>Error: {error.message}</span>;
+
+  return <span>{formatted ?? "0"} tokens</span>;
+}
+```
+
+---
+
+## buildReadOnlyAdapter
+
+`buildReadOnlyAdapter` is an internal helper that `useAsset` and `useTokenBalance` use to create a read-only `EVMAdapter` or `StellarAdapter` without any signing credentials. It is exported for advanced use cases — for example, building a custom hook that calls methods not yet covered by the built-in hooks — but most applications should not need it directly.
+
+---
+
+## Complete example: portfolio page
+
+This example renders a list of RWA tokens owned by the connected wallet, showing live metadata and balances for each.
+
+```tsx
+"use client";
+
+import { useAnkaraChain, useAsset, useTokenBalance } from "@ankarachain/sdk/react";
+import { AssetStatus } from "@ankarachain/sdk";
+import { ethers, BrowserProvider } from "ethers";
+import { useMemo, useState, useEffect } from "react";
+
+type TokenEntry = {
+  address:  string;
+  template: "farmland" | "commodity" | "real-estate" | "invoice" | "carbon-credit" | "mining-rights";
+};
+
+// These would normally come from your back-end or a subgraph
+const MY_TOKENS: TokenEntry[] = [
+  { address: "0xFarmlandTokenAddress", template: "farmland"    },
+  { address: "0xRealEstateAddress",    template: "real-estate" },
+  { address: "0xCarbonCreditAddress",  template: "carbon-credit" },
+];
+
+function PortfolioRow({ token, walletAddress }: { token: TokenEntry; walletAddress: string }) {
+  const asset   = useAsset({ tokenAddress: token.address, template: token.template, network: "polygon-amoy" });
+  const balance = useTokenBalance({ tokenAddress: token.address, walletAddress, network: "polygon-amoy" });
+
+  if (asset.isLoading) return <tr><td colSpan={5}>Loading {token.address}…</td></tr>;
+
+  return (
+    <tr>
+      <td>{asset.name ?? "—"}</td>
+      <td>{asset.symbol ?? "—"}</td>
+      <td>{token.template}</td>
+      <td>
+        {asset.valuationUSD != null
+          ? `$${ethers.formatEther(asset.valuationUSD)}`
+          : "—"}
+      </td>
+      <td>
+        {balance.isLoading
+          ? "…"
+          : `${balance.formatted ?? "0"} tokens`}
+      </td>
+    </tr>
+  );
+}
+
+export default function PortfolioPage() {
+  const [signer, setSigner] = useState<ethers.Signer | undefined>(undefined);
+
+  useEffect(() => {
+    async function connect() {
+      if (!window.ethereum) return;
+      const provider = new BrowserProvider(window.ethereum);
+      setSigner(await provider.getSigner());
+    }
+    connect();
+  }, []);
+
+  const { address, isConnected, isLoading } = useAnkaraChain({
+    network:        "polygon-amoy",
+    factoryAddress: "0xYourFactoryAddress",
+    signer,
+  });
+
+  if (isLoading)    return <p>Connecting wallet…</p>;
+  if (!isConnected) return <p>Connect your wallet to view your portfolio.</p>;
+
+  return (
+    <div>
+      <h1>My RWA Portfolio</h1>
+      <p>Wallet: {address}</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Symbol</th>
+            <th>Template</th>
+            <th>Valuation</th>
+            <th>Your Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {MY_TOKENS.map((token) => (
+            <PortfolioRow key={token.address} token={token} walletAddress={address!} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+```
+
+---
+
+## Using Stellar in the browser
+
+For Stellar, pass a `StellarAnkaraChainConfig` with `stellarSigner` instead of `stellarSecretKey`. A `stellarSigner` matches Freighter's API shape exactly, so you can pass the Freighter global object directly:
+
+```tsx
+import { useAnkaraChain } from "@ankarachain/sdk/react";
+
+declare const window: Window & { freighter: any };
+
+function StellarApp() {
+  const { factory, address, isConnected } = useAnkaraChain({
+    network:        "stellar-testnet",
+    factoryAddress: "CYourStellarFactoryContractId",
+    stellarSigner: {
+      publicKey:       window.freighter.getPublicKey(),
+      signTransaction: window.freighter.signTransaction,
+    },
+  });
+
+  // ... rest of the component
+}
+```
+
+<Warning>
+  Never use `stellarSecretKey` in browser code. The raw Stellar secret seed gives full control of the account to anyone who reads it from your JavaScript bundle, network traffic, or browser memory. Use `stellarSigner` with Freighter (or any SEP-43-compatible wallet) in all browser contexts.
+</Warning>
+
+`useAsset` and `useTokenBalance` work identically on Stellar — pass `network: "stellar-testnet"` and a Stellar contract ID (`"C..."`) as `tokenAddress`, and both hooks will use the Soroban read-only adapter internally.

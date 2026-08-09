@@ -1,0 +1,648 @@
+---
+title: "RampManager: Orchestrate Fiat On-Ramp and Off-Ramp Flows"
+sidebarTitle: "RampManager"
+description: "RampManager orchestrates fiat on-ramp and off-ramp sessions, connecting your token flows to local currencies via a pluggable provider interface."
+---
+
+`RampManager` orchestrates the full fiat ↔ token conversion lifecycle. It has two halves: an **off-chain half** that talks to a pluggable `RampProvider` for quotes, session creation, and status polling; and an optional **on-chain half** that talks to a deployed `RampSettlement` contract to hold tokens in custody during off-ramp flows and record on-ramp attestations.
+
+The SDK ships two ready-made providers: `ManualRampProvider` for local development and testing, and `StellarAnchorProvider` for production use with any SEP-24-compatible Stellar anchor. For Yellow Card, Flutterwave, Transak, or other providers, implement the `RampProvider` interface and pass it to the constructor.
+
+## Import
+
+```typescript
+import {
+  RampManager,
+  ManualRampProvider,
+  StellarAnchorProvider,
+} from "@ankarachain/sdk";
+```
+
+---
+
+## Constructor
+
+```typescript
+new RampManager(provider: RampProvider, adapter?: IAdapter, opts?: RampManagerOptions)
+```
+
+Constructs a `RampManager` that uses the same provider for both on-ramp and off-ramp.
+
+<ParamField path="provider" type="RampProvider" required>
+  The `RampProvider` implementation to use for quotes, session creation, and status polling.
+</ParamField>
+
+<ParamField path="adapter" type="IAdapter">
+  The `EVMAdapter` or `StellarAdapter` for on-chain settlement. Required only if you want to call `depositOffRamp`, `confirmOffRampSettlement`, `refundOffRamp`, or `recordOnRampSettlement`.
+</ParamField>
+
+<ParamField path="opts.settlementAddress" type="string">
+  Address of a deployed `RampSettlement` contract. Required for on-chain methods. Obtain this address by deploying with `TokenFactory.deployRampSettlement()`.
+</ParamField>
+
+```typescript
+import { RampManager, ManualRampProvider } from "@ankarachain/sdk";
+
+const ramp = new RampManager(
+  new ManualRampProvider({ exchangeRates: { NGN: 1 / 1580 }, feeBps: 150 }),
+  factory.adapter,
+  { settlementAddress: "0xYourRampSettlementAddress" }
+);
+```
+
+---
+
+## Static Methods
+
+### `RampManager.withProviders`
+
+```typescript
+static withProviders(
+  providers: { onRamp: RampProvider; offRamp: RampProvider },
+  adapter?: IAdapter,
+  opts?: RampManagerOptions
+): RampManager
+```
+
+Builds a `RampManager` where on-ramp and off-ramp use independently configured providers. Use this when you want, for example, MoonPay for on-ramp and a Stellar anchor for off-ramp.
+
+<ParamField path="providers.onRamp" type="RampProvider" required>
+  Provider to use for on-ramp quotes and session creation.
+</ParamField>
+
+<ParamField path="providers.offRamp" type="RampProvider" required>
+  Provider to use for off-ramp quotes and session creation.
+</ParamField>
+
+```typescript
+import {
+  RampManager,
+  ManualRampProvider,
+  StellarAnchorProvider,
+} from "@ankarachain/sdk";
+
+const ramp = RampManager.withProviders(
+  {
+    onRamp:  new ManualRampProvider(),          // local dev on-ramp
+    offRamp: new StellarAnchorProvider({        // real anchor for off-ramp
+      homeDomain: "cowrie.exchange",
+      signer: freighterSigner,
+    }),
+  },
+  adapter,
+  { settlementAddress: contractAddress }
+);
+```
+
+---
+
+### `RampManager.connectAnchor`
+
+```typescript
+static connectAnchor(
+  anchorHomeDomain: string,
+  signer: StellarExternalSigner,
+  adapter?: IAdapter,
+  opts?: RampManagerOptions
+): RampManager
+```
+
+Convenience factory that constructs a `StellarAnchorProvider` for you, then wraps it in a `RampManager`. The anchor's `stellar.toml` and SEP-10 handshake are resolved lazily on the first real call — this method does not make any network requests.
+
+<ParamField path="anchorHomeDomain" type="string" required>
+  The home domain of the Stellar anchor, e.g. `"cowrie.exchange"` or `"moneygram.com"`.
+</ParamField>
+
+<ParamField path="signer" type="StellarExternalSigner" required>
+  A SEP-43-compatible external wallet signer (e.g. Freighter) that signs SEP-10 challenges and off-ramp withdrawal transactions.
+</ParamField>
+
+```typescript
+const ramp = RampManager.connectAnchor(
+  "cowrie.exchange",
+  freighterSigner,
+  adapter,
+  { settlementAddress: contractAddress }
+);
+```
+
+---
+
+## Off-Chain Methods
+
+These methods talk to the `RampProvider` only — they do not touch the chain.
+
+### `getQuote`
+
+```typescript
+getQuote(input: RampQuoteInput): Promise<RampQuote>
+```
+
+Fetches a quote for a fiat ↔ token conversion. The quote includes the exchange rate, fee, and an expiry timestamp. Routes to the on-ramp or off-ramp provider based on `input.direction`.
+
+<ParamField path="input.direction" type='"on-ramp" | "off-ramp"' required>
+  Whether the user is buying tokens with fiat (`"on-ramp"`) or selling tokens for fiat (`"off-ramp"`).
+</ParamField>
+
+<ParamField path="input.fiatCurrency" type="string" required>
+  ISO 4217 fiat currency code, e.g. `"NGN"`, `"KES"`, `"GHS"`.
+</ParamField>
+
+<ParamField path="input.tokenSymbol" type="string" required>
+  Token ticker, e.g. `"USDC"`, `"USDT"`.
+</ParamField>
+
+<ParamField path="input.countryCode" type="string" required>
+  ISO 3166-1 alpha-2 country code, e.g. `"NG"`.
+</ParamField>
+
+<ParamField path="input.fiatAmount" type="string">
+  Fiat amount to convert. Provide either `fiatAmount` or `tokenAmount`, not both.
+</ParamField>
+
+<ParamField path="input.tokenAmount" type="string">
+  Token amount to convert. Provide either `fiatAmount` or `tokenAmount`, not both.
+</ParamField>
+
+**Returns:** `Promise<RampQuote>`
+
+<ResponseField name="fiatAmount" type="string">
+  The fiat amount for this quote (may be calculated if you passed `tokenAmount`).
+</ResponseField>
+
+<ResponseField name="tokenAmount" type="string">
+  The token amount for this quote (may be calculated if you passed `fiatAmount`).
+</ResponseField>
+
+<ResponseField name="exchangeRate" type="string">
+  The exchange rate applied (tokens per 1 unit of fiat).
+</ResponseField>
+
+<ResponseField name="feeFiat" type="string">
+  The provider fee in fiat currency.
+</ResponseField>
+
+<ResponseField name="expiresAt" type="number">
+  Unix timestamp after which this quote is no longer valid.
+</ResponseField>
+
+```typescript
+const quote = await ramp.getQuote({
+  direction:    "off-ramp",
+  fiatCurrency: "NGN",
+  tokenSymbol:  "USDC",
+  countryCode:  "NG",
+  tokenAmount:  "100",
+});
+
+console.log(`Rate: 1 USDC = ${quote.exchangeRate} NGN`);
+console.log(`You get: ₦${quote.fiatAmount} (fee: ₦${quote.feeFiat})`);
+```
+
+---
+
+### `initiateOnRamp`
+
+```typescript
+initiateOnRamp(input: InitiateOnRampInput): Promise<RampSession>
+```
+
+Starts an on-ramp session with the on-ramp provider. Returns a `RampSession` including a `paymentUrl` where the user completes the fiat payment. Does not touch the chain.
+
+<ParamField path="input.fiatAmount" type="string" required>
+  Fiat amount the user is paying.
+</ParamField>
+
+<ParamField path="input.fiatCurrency" type="string" required>
+  ISO 4217 code, e.g. `"NGN"`.
+</ParamField>
+
+<ParamField path="input.tokenSymbol" type="string" required>
+  Token the user will receive, e.g. `"USDC"`.
+</ParamField>
+
+<ParamField path="input.recipientAddress" type="string" required>
+  On-chain address where the tokens will be delivered.
+</ParamField>
+
+<ParamField path="input.countryCode" type="string" required>
+  ISO 3166-1 alpha-2 country code.
+</ParamField>
+
+<ParamField path="input.customerReference" type="string">
+  Optional internal reference string for your records.
+</ParamField>
+
+**Returns:** `Promise<RampSession>`
+
+<ResponseField name="sessionId" type="string">
+  Unique session identifier. Store this to query status or call on-chain methods.
+</ResponseField>
+
+<ResponseField name="paymentUrl" type="string | undefined">
+  URL where the user completes the fiat payment (on-ramp only).
+</ResponseField>
+
+<ResponseField name="status" type="RampSessionStatus">
+  Initial status. Always `"pending"` immediately after creation.
+</ResponseField>
+
+```typescript
+const session = await ramp.initiateOnRamp({
+  fiatAmount:       "150000",
+  fiatCurrency:     "NGN",
+  tokenSymbol:      "USDC",
+  recipientAddress: "0xInvestorAddress",
+  countryCode:      "NG",
+});
+
+// Redirect the user to complete payment
+window.open(session.paymentUrl, "_blank");
+```
+
+---
+
+### `initiateOffRamp`
+
+```typescript
+initiateOffRamp(input: InitiateOffRampInput): Promise<RampSession>
+```
+
+Starts an off-ramp session with the off-ramp provider. The user will receive fiat at their specified bank or mobile-money account. Does not touch the chain — call `depositOffRamp` separately to move tokens to the settlement contract.
+
+<ParamField path="input.tokenAmount" type="string" required>
+  Token amount to sell.
+</ParamField>
+
+<ParamField path="input.tokenSymbol" type="string" required>
+  Token ticker, e.g. `"USDC"`.
+</ParamField>
+
+<ParamField path="input.fiatCurrency" type="string" required>
+  ISO 4217 code, e.g. `"NGN"`.
+</ParamField>
+
+<ParamField path="input.payoutAccount" type="RampPayoutAccount" required>
+  Bank or mobile-money account for the fiat payout.
+</ParamField>
+
+<ParamField path="input.countryCode" type="string" required>
+  ISO 3166-1 alpha-2 country code.
+</ParamField>
+
+**`RampPayoutAccount` fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `"bank" \| "mobile-money"` | Payout method |
+| `accountNumber` | `string` | Account or phone number |
+| `accountName` | `string` | Optional account holder name |
+| `bankCode` | `string` | Required for `type: "bank"` |
+| `provider` | `string` | Required for `type: "mobile-money"` (e.g. `"MTN"`, `"Airtel"`) |
+
+```typescript
+const session = await ramp.initiateOffRamp({
+  tokenAmount:  "100",
+  tokenSymbol:  "USDC",
+  fiatCurrency: "NGN",
+  countryCode:  "NG",
+  payoutAccount: {
+    type:          "bank",
+    accountNumber: "0123456789",
+    accountName:   "Amina Saleh",
+    bankCode:      "058", // GTBank
+  },
+});
+```
+
+---
+
+### `getStatus`
+
+```typescript
+getStatus(sessionId: string): Promise<RampSessionStatus>
+```
+
+Polls the provider for the current status of a session.
+
+<ParamField path="sessionId" type="string" required>
+  The session ID returned from `initiateOnRamp` or `initiateOffRamp`.
+</ParamField>
+
+<ResponseField name="RampSessionStatus" type="enum">
+  `"pending"` · `"processing"` · `"settled"` · `"failed"` · `"refunded"`
+</ResponseField>
+
+```typescript
+import { RampSessionStatus } from "@ankarachain/sdk";
+
+const status = await ramp.getStatus(session.sessionId);
+if (status === RampSessionStatus.SETTLED) {
+  console.log("Fiat delivered successfully.");
+}
+```
+
+---
+
+## On-Chain Methods
+
+These methods require both an `adapter` and a `settlementAddress` to be configured on the `RampManager`. They throw if either is missing.
+
+### `depositOffRamp`
+
+```typescript
+depositOffRamp(sessionId: string, tokenAddress: string, amount: bigint): Promise<string>
+```
+
+Deposits tokens into the `RampSettlement` contract for custody during an off-ramp session. On EVM, you must approve the settlement contract to spend `amount` of `tokenAddress` before calling this. On Stellar, the nested transfer is authorized within the same call.
+
+<ParamField path="sessionId" type="string" required>
+  Session ID from `initiateOffRamp`.
+</ParamField>
+
+<ParamField path="tokenAddress" type="string" required>
+  Address of the token to deposit.
+</ParamField>
+
+<ParamField path="amount" type="bigint" required>
+  Amount in wei.
+</ParamField>
+
+```typescript
+// EVM: approve first, then deposit
+const usdc = new ethers.Contract(usdcAddress, ERC20_ABI, signer);
+await usdc.approve(settlementAddress, ethers.parseUnits("100", 6));
+
+const txHash = await ramp.depositOffRamp(session.sessionId, usdcAddress, ethers.parseUnits("100", 6));
+```
+
+---
+
+### `confirmOffRampSettlement`
+
+```typescript
+confirmOffRampSettlement(sessionId: string): Promise<string>
+```
+
+Releases the custodied tokens to the treasury address once the provider confirms the fiat payout was delivered. Typically called by the platform backend after polling `getStatus` and observing `"settled"`.
+
+<ParamField path="sessionId" type="string" required>
+  Session ID of the settled off-ramp session.
+</ParamField>
+
+---
+
+### `refundOffRamp`
+
+```typescript
+refundOffRamp(sessionId: string): Promise<string>
+```
+
+Returns the custodied tokens to the original depositor if the fiat payout failed.
+
+<ParamField path="sessionId" type="string" required>
+  Session ID of the failed off-ramp session.
+</ParamField>
+
+---
+
+### `recordOnRampSettlement`
+
+```typescript
+recordOnRampSettlement(
+  sessionId: string,
+  recipient: string,
+  tokenAddress: string,
+  amount: bigint
+): Promise<string>
+```
+
+Records an on-chain attestation that an on-ramp mint/transfer happened for this session. This does **not** move funds — mint or transfer the tokens separately via your existing token contracts, then record the attestation here for audit trail purposes.
+
+<ParamField path="sessionId" type="string" required>
+  Session ID of the completed on-ramp session.
+</ParamField>
+
+<ParamField path="recipient" type="string" required>
+  On-chain address that received the minted/transferred tokens.
+</ParamField>
+
+<ParamField path="tokenAddress" type="string" required>
+  Address of the token that was minted.
+</ParamField>
+
+<ParamField path="amount" type="bigint" required>
+  Amount of tokens minted in wei.
+</ParamField>
+
+---
+
+### `getOffRampDeposit`
+
+```typescript
+getOffRampDeposit(sessionId: string): Promise<OffRampDeposit>
+```
+
+Returns the on-chain deposit record for an off-ramp session.
+
+<ResponseField name="depositor" type="string">
+  Address that called `depositOffRamp`.
+</ResponseField>
+
+<ResponseField name="token" type="string">
+  Token address deposited.
+</ResponseField>
+
+<ResponseField name="amount" type="bigint">
+  Deposited amount in wei.
+</ResponseField>
+
+<ResponseField name="status" type="RampSettlementStatus">
+  `NONE (0)` · `PENDING (1)` · `SETTLED (2)` · `REFUNDED (3)` · `RECORDED (4)`
+</ResponseField>
+
+---
+
+### `getOnRampRecord`
+
+```typescript
+getOnRampRecord(sessionId: string): Promise<OnRampRecord>
+```
+
+Returns the on-chain attestation record for an on-ramp session.
+
+---
+
+## Properties
+
+```typescript
+ramp.providerName           // On-ramp provider name (backward compat)
+ramp.onRampProviderName     // On-ramp provider name
+ramp.offRampProviderName    // Off-ramp provider name
+ramp.hasSettlementContract  // true if a settlementAddress was configured
+ramp.settlementAddress      // The configured settlement address, or undefined
+```
+
+---
+
+## Provider Reference
+
+### `ManualRampProvider`
+
+```typescript
+new ManualRampProvider(opts?: ManualRampProviderOptions)
+```
+
+A reference `RampProvider` for local development. Quotes are calculated from statically configured exchange rates; sessions only change status when you call `markSettled()` or `markFailed()` in your test code.
+
+<ParamField path="opts.exchangeRates" type='Record<string, number>'>
+  Map of fiat currency code → tokens per 1 unit of fiat. Defaults to `{ NGN: 1/1500, KES: 1/150, GHS: 1/15 }`.
+</ParamField>
+
+<ParamField path="opts.feeBps" type="number">
+  Flat fee in basis points applied to the fiat amount. Defaults to `100` (1%).
+</ParamField>
+
+```typescript
+import { ManualRampProvider } from "@ankarachain/sdk";
+
+const provider = new ManualRampProvider({
+  exchangeRates: { NGN: 1 / 1580, KES: 1 / 152, GHS: 1 / 16 },
+  feeBps: 150, // 1.5%
+});
+
+// In tests, advance session state manually:
+provider.markSettled(session.sessionId);
+provider.markFailed(session.sessionId);
+```
+
+---
+
+### `StellarAnchorProvider`
+
+```typescript
+new StellarAnchorProvider(opts: StellarAnchorProviderOptions)
+```
+
+A production `RampProvider` backed by any SEP-24 Stellar anchor. Authentication uses SEP-10 (challenge/response signed by the user's wallet); quotes use SEP-38 where the anchor supports it. The `stellar.toml` is resolved lazily on first use.
+
+<ParamField path="opts.homeDomain" type="string" required>
+  The anchor's home domain, e.g. `"cowrie.exchange"`.
+</ParamField>
+
+<ParamField path="opts.signer" type="StellarExternalSigner" required>
+  A SEP-43-compatible wallet signer. Use `RampManager.connectAnchor()` as a shortcut to avoid constructing this provider directly.
+</ParamField>
+
+<ParamField path="opts.networkPassphrase" type="string">
+  Stellar network passphrase. Defaults to the public testnet passphrase. Override with `Networks.PUBLIC` for mainnet.
+</ParamField>
+
+<Warning>
+  `StellarAnchorProvider` has been built to the SEP-10/SEP-24/SEP-38 specification but has not yet been tested against a live anchor in production. Verify the SEP-38 asset identifier format and the anchor's specific status strings before deploying to a mainnet environment.
+</Warning>
+
+---
+
+## Full Off-Ramp Flow Example
+
+```typescript
+import {
+  RampManager,
+  ManualRampProvider,
+  RampSessionStatus,
+} from "@ankarachain/sdk";
+import { ethers } from "ethers";
+
+// 1. Set up RampManager with settlement contract
+const ramp = new RampManager(
+  new ManualRampProvider({ exchangeRates: { NGN: 1 / 1580 } }),
+  factory.adapter,
+  { settlementAddress: "0xRampSettlementAddress" }
+);
+
+// 2. Get a quote
+const quote = await ramp.getQuote({
+  direction: "off-ramp", fiatCurrency: "NGN",
+  tokenSymbol: "USDC", countryCode: "NG", tokenAmount: "100",
+});
+console.log(`Estimated payout: ₦${quote.fiatAmount}`);
+
+// 3. Initiate session
+const session = await ramp.initiateOffRamp({
+  tokenAmount:  "100",
+  tokenSymbol:  "USDC",
+  fiatCurrency: "NGN",
+  countryCode:  "NG",
+  payoutAccount: { type: "mobile-money", accountNumber: "08012345678", provider: "MTN" },
+});
+
+// 4. Approve and deposit tokens
+const usdc = new ethers.Contract(usdcAddress, ERC20_ABI, signer);
+await usdc.approve(ramp.settlementAddress, ethers.parseUnits("100", 6));
+await ramp.depositOffRamp(session.sessionId, usdcAddress, ethers.parseUnits("100", 6));
+
+// 5. Poll until settled (or use a webhook in production)
+let status = await ramp.getStatus(session.sessionId);
+while (status === RampSessionStatus.PENDING || status === RampSessionStatus.PROCESSING) {
+  await new Promise(r => setTimeout(r, 5000));
+  status = await ramp.getStatus(session.sessionId);
+}
+
+// 6. Confirm or refund
+if (status === RampSessionStatus.SETTLED) {
+  await ramp.confirmOffRampSettlement(session.sessionId);
+} else {
+  await ramp.refundOffRamp(session.sessionId);
+}
+```
+
+---
+
+## Type Reference
+
+```typescript
+enum RampSessionStatus {
+  PENDING    = "pending",
+  PROCESSING = "processing",
+  SETTLED    = "settled",
+  FAILED     = "failed",
+  REFUNDED   = "refunded",
+}
+
+enum RampSettlementStatus {
+  NONE     = 0,
+  PENDING  = 1,
+  SETTLED  = 2,
+  REFUNDED = 3,
+  RECORDED = 4,
+}
+
+interface RampQuote {
+  direction:    RampDirection;
+  fiatCurrency: string;
+  fiatAmount:   string;
+  tokenAmount:  string;
+  tokenSymbol:  string;
+  exchangeRate: string;
+  feeFiat:      string;
+  expiresAt:    number;  // unix seconds
+}
+
+interface RampSession {
+  sessionId:    string;
+  direction:    RampDirection;
+  status:       RampSessionStatus;
+  providerRef:  string;
+  paymentUrl?:  string;  // on-ramp only
+  createdAt:    number;
+}
+
+interface RampProvider {
+  readonly name:    string;
+  getQuote(input:   RampQuoteInput):      Promise<RampQuote>;
+  initiateOnRamp(input: InitiateOnRampInput):  Promise<RampSession>;
+  initiateOffRamp(input: InitiateOffRampInput): Promise<RampSession>;
+  getStatus(sessionId: string):           Promise<RampSessionStatus>;
+}
+```

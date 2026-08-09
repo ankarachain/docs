@@ -1,0 +1,167 @@
+---
+title: "EVM Smart Contracts: Solidity Contracts on Polygon and EVM Chains"
+sidebarTitle: "EVM Contracts"
+description: "Ankara Chain's Solidity contracts use OpenZeppelin UUPS upgradeable proxies and TypeChain-generated bindings, deployable on any EVM-compatible chain."
+---
+
+The EVM contract suite lives in `packages/contracts-evm` and is built with Hardhat and OpenZeppelin Contracts v5. Every contract uses the UUPS upgradeable proxy pattern — you own the proxy addresses and the upgrade authority. TypeChain generates fully-typed ethers.js v6 bindings from the compiled artifacts, and the SDK bundles minimal ABI fragments for runtime use without requiring the full TypeChain output.
+
+---
+
+## Contract descriptions
+
+### `AnkaraChainBaseToken`
+
+The abstract ERC-20 base inherited by all six token templates. Extends OpenZeppelin's `ERC20Upgradeable`, `ERC20PausableUpgradeable`, `OwnableUpgradeable`, and `UUPSUpgradeable`. Adds:
+
+- `assetId` — immutable `bytes32` identifier set at initialization
+- `countryCode` — ISO 3166-1 alpha-2 string (e.g. `"NG"`, `"KE"`)
+- `status` — `AssetStatus` enum (`DRAFT=0`, `ACTIVE=1`, `SUSPENDED=2`, `REDEEMED=3`, `EXPIRED=4`)
+- `identityVerifier` — optional `IIdentityVerifier` that gates transfers and minting
+- `metadataVersion` — increments on every metadata update for off-chain indexing
+
+### `TokenFactory`
+
+Deploys ERC-1967 proxies against registered template implementations. Key functions:
+
+```solidity
+function deployFarmlandToken(
+    string name, string symbol, bytes32 assetId, string country,
+    address admin, address verifier,
+    FarmlandToken.Metadata calldata metadata
+) payable returns (address);
+
+function registerTemplate(uint8 template, address implementation) external;
+function getDeployerTokens(address deployer) view returns (address[]);
+function deploymentFee() view returns (uint256);
+```
+
+Emits `TokenDeployed(uint8 template, address tokenAddress, address deployer, bytes32 assetId, string countryCode, uint256 timestamp)`.
+
+### Six template contracts
+
+| Contract | `AssetTemplate` key | Notable functions |
+|---|---|---|
+| `FarmlandToken` | `farmland` | `updateValuation`, `updateTitleDocument` |
+| `CommodityReceiptToken` | `commodity` | `markExpired`, `isExpired` |
+| `RealEstateToken` | `real-estate` | `declareRentalDistribution`, `updateOccupancyStatus` |
+| `InvoiceToken` | `invoice` | `markFunded`, `markRepaid`, `markDefaulted`, `isOverdue`, `daysUntilDue` |
+| `CarbonCreditToken` | `carbon-credit` | `retire(amount, beneficiary, note)`, `totalRetired` |
+| `MiningRightsToken` | `mining-rights` | `renewLicense`, `markLicenseExpired`, `declareRoyalty` |
+
+All six share the `AnkaraChainBaseToken` interface (`mint`, `burn`, `pause`, `unpause`, `setStatus`, `setIdentityVerifier`, `getMetadata`).
+
+### `WhitelistVerifier`
+
+Implements the `IIdentityVerifier` interface. An admin-managed address allowlist. Attach it to any token at deploy time via `identityVerifier` in `BaseDeployOptions`, or update it later via `setIdentityVerifier`.
+
+```solidity
+function verifyIdentity(address account) external;   // admin only
+function revokeIdentity(address account) external;   // admin only
+function batchVerify(address[] accounts) external;   // admin only
+function isVerified(address account) view returns (bool);
+```
+
+---
+
+## Upgrade pattern
+
+The contracts use **UUPS** (Universal Upgradeable Proxy Standard, EIP-1822) with OpenZeppelin v5. Under UUPS, the upgrade logic lives in the implementation contract itself — not the proxy. This means the implementation can enforce authorization (only the owner can upgrade) and can be replaced without changing the proxy address your users interact with.
+
+To upgrade a deployed token:
+
+1. Deploy a new implementation contract (e.g. `FarmlandTokenV2`).
+2. Call `upgradeToAndCall` on the proxy address from the owner wallet.
+
+```typescript
+import { Contract } from "ethers";
+import { FARMLAND_TOKEN_ABI } from "@ankarachain/sdk";
+
+const proxy = new Contract(tokenAddress, FARMLAND_TOKEN_ABI, signer);
+await proxy.upgradeToAndCall(newImplementationAddress, "0x");
+```
+
+<Note>
+  The `TokenFactory` deploys proxies using OpenZeppelin's `ERC1967Proxy`. The optimizer is configured with `viaIR: true` and `runs: 200`. TypeChain targets `ethers-v6`.
+</Note>
+
+---
+
+## Roles and access control
+
+Role management is handled by OpenZeppelin's `OwnableUpgradeable`. The `owner` of a token (the `admin` address set at deployment, defaulting to the deployer) controls:
+
+- **Minting**: `mint(address to, uint256 amount)` — owner only
+- **Burning**: `burn(uint256 amount)` — token holder (anyone burns their own tokens)
+- **Status updates**: `setStatus(uint8 newStatus)` — owner only
+- **Metadata updates**: `updateValuation`, `updateTitleDocument`, etc. — owner only
+- **Pause / unpause**: `pause()` / `unpause()` — owner only
+- **Identity verifier**: `setIdentityVerifier(address verifier)` — owner only
+- **Upgrades**: `upgradeToAndCall` — owner only
+
+The owner can transfer ownership to a multisig or DAO contract at any time via OpenZeppelin's standard `transferOwnership`.
+
+---
+
+## Compiling and testing locally
+
+Clone the repository and install dependencies, then use these commands from the repo root or from `packages/contracts-evm`:
+
+```bash
+# Compile all Solidity contracts (generates TypeChain bindings)
+npm run compile
+
+# Run the full Hardhat test suite
+npm run test:contracts
+
+# Run with coverage report
+cd packages/contracts-evm && npm run test:coverage
+
+# Start a local Hardhat node
+cd packages/contracts-evm && npm run node
+
+# Deploy to local node (in a second terminal, after node is running)
+cd packages/contracts-evm && npm run deploy:local
+```
+
+Environment variables required for testnet deployment (copy from `.env.example` in `packages/contracts-evm`):
+
+```bash
+PRIVATE_KEY=0x...          # Deployer wallet private key
+ALCHEMY_API_KEY=...         # For Amoy/mainnet RPC
+POLYGONSCAN_API_KEY=...     # For contract verification
+```
+
+---
+
+## Deployment with the CLI
+
+For production deployments, use the `npx ankara` CLI rather than running Hardhat scripts directly.
+
+```bash
+# Deploy the factory contracts (run once per network)
+npx ankara deploy-factory
+
+# Deploy a token (interactive wizard)
+npx ankara deploy
+
+# Check status of a deployed token
+npx ankara status --address 0xYourTokenAddress
+
+# Mint tokens to an address
+npx ankara mint --address 0xYourTokenAddress --to 0xRecipient --amount 1000
+```
+
+<Tip>
+  Run `npx ankara init` first to generate an `ankara.config.json` in your project. The CLI reads this file for the network, signer, and factory address so you don't need to pass flags every time.
+</Tip>
+
+---
+
+## Source code
+
+The EVM contracts are open source under the MIT License:
+
+**[github.com/ankarachain/ankara-core/tree/main/packages/contracts-evm](https://github.com/ankarachain/ankara-core/tree/main/packages/contracts-evm)**
+
+The package is `@ankarachain/contracts-evm` (private — not published to npm). Build with Hardhat `^2.22.0` and OpenZeppelin Contracts `^5.0.0`.

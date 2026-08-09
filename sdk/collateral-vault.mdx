@@ -1,0 +1,437 @@
+---
+title: "CollateralVault: Asset-Backed Lending on Stellar"
+sidebarTitle: "CollateralVault"
+description: "CollateralVault enables borrowers to lock RWA tokens as collateral and borrow stablecoins — currently available on Stellar Soroban with a 60% LTV ratio."
+---
+
+`CollateralVault` lets you interact with a deployed collateral lending pool: pledge any Ankara Chain RWA token as collateral, borrow the vault's configured stablecoin up to the configured loan-to-value (LTV) ratio, repay, or liquidate an undercollateralized loan. Token prices are read from an on-chain oracle to calculate live LTV in real time.
+
+<Note>
+  **Stellar Soroban only in v1.** `CollateralVault` is backed by a Soroban contract — pass a `StellarAdapter`. Calling any method with an `EVMAdapter` will throw. EVM support is planned for a future release.
+</Note>
+
+<Note>
+  `CollateralVault` is a **singleton per network** — one vault instance holds many loans. You do not deploy it via `TokenFactory`; it is provisioned once per deployment environment by the platform operator. Obtain the vault's contract address from the Ankara Chain network registry or your platform configuration.
+</Note>
+
+## Import
+
+```typescript
+import { CollateralVault, LoanStatus } from "@ankarachain/sdk";
+```
+
+---
+
+## Constructor
+
+```typescript
+new CollateralVault(adapter: IAdapter, vaultAddress: string)
+```
+
+<ParamField path="adapter" type="IAdapter" required>
+  A `StellarAdapter` connected to the Stellar network where the vault is deployed. Obtain it from `tokenFactory.adapter` after constructing `TokenFactory` with `network: "stellar"` or `"stellar-testnet"`.
+</ParamField>
+
+<ParamField path="vaultAddress" type="string" required>
+  The Soroban contract ID of the deployed `CollateralVault` (starts with `"C..."`).
+</ParamField>
+
+```typescript
+import { TokenFactory, CollateralVault } from "@ankarachain/sdk";
+
+const factory = new TokenFactory({
+  network:         "stellar-testnet",
+  stellarSecretKey: process.env.STELLAR_SECRET!,
+});
+
+const vault = new CollateralVault(factory.adapter, "CCollateralVaultContractId...");
+```
+
+---
+
+## Borrower Methods
+
+### `openLoan`
+
+```typescript
+openLoan(
+  collateralToken: string,
+  collateralAmount: bigint,
+  borrowAmount: bigint
+): Promise<{ loanId: number; txHash: string }>
+```
+
+Pledges `collateralAmount` of an RWA token and borrows `borrowAmount` of the vault's stablecoin. The oracle price of the collateral token is checked at the time of opening to ensure the borrow amount does not exceed the vault's LTV.
+
+<ParamField path="collateralToken" type="string" required>
+  Soroban contract ID of the RWA token to pledge as collateral (e.g. the address of a deployed `FarmlandToken`).
+</ParamField>
+
+<ParamField path="collateralAmount" type="bigint" required>
+  Amount of collateral token to lock, in the token's native precision (typically 1e7 for Stellar tokens).
+</ParamField>
+
+<ParamField path="borrowAmount" type="bigint" required>
+  Amount of stablecoin to borrow, in the stablecoin's native precision. Must not exceed `collateralValue × ltvBps / 10000`.
+</ParamField>
+
+**Returns:** `Promise<{ loanId: number; txHash: string }>`
+
+<ResponseField name="loanId" type="number">
+  Unique integer ID for this loan. Use it with `repayLoan`, `liquidate`, and `getLoan`.
+</ResponseField>
+
+<ResponseField name="txHash" type="string">
+  Transaction hash of the loan opening.
+</ResponseField>
+
+```typescript
+// Borrow 600 USDC against 1,000 farmland tokens
+// (assumes vault LTV is 60% and oracle prices the collateral at $1 each)
+const { loanId, txHash } = await vault.openLoan(
+  farmlandTokenContractId,
+  1_000n * 10_000_000n,  // 1,000 tokens (7 decimal places)
+  600n  * 10_000_000n    // 600 USDC
+);
+
+console.log("Loan opened, ID:", loanId);
+```
+
+---
+
+### `repayLoan`
+
+```typescript
+repayLoan(loanId: number): Promise<string>
+```
+
+Repays the full borrowed amount and releases the collateral back to the borrower. You must approve the vault to spend the borrowed stablecoin before calling this.
+
+<ParamField path="loanId" type="number" required>
+  The loan ID returned from `openLoan`.
+</ParamField>
+
+```typescript
+const txHash = await vault.repayLoan(loanId);
+console.log("Loan repaid, collateral returned. Tx:", txHash);
+```
+
+---
+
+### `liquidate`
+
+```typescript
+liquidate(loanId: number): Promise<string>
+```
+
+Liquidates an undercollateralized loan by seizing the collateral. Anyone can call this once a loan's live LTV (from `currentLtvBps`) has crossed the liquidation threshold — it is not restricted to an admin.
+
+<ParamField path="loanId" type="number" required>
+  The ID of the loan to liquidate.
+</ParamField>
+
+```typescript
+// Check before liquidating
+const canLiquidate = await vault.isLiquidatable(loanId);
+if (canLiquidate) {
+  const txHash = await vault.liquidate(loanId);
+}
+```
+
+---
+
+## Read Methods
+
+### `getLoan`
+
+```typescript
+getLoan(loanId: number): Promise<Loan>
+```
+
+Returns the full state of a loan.
+
+<ParamField path="loanId" type="number" required>
+  The loan ID to query.
+</ParamField>
+
+<ResponseField name="borrower" type="string">
+  Address of the borrower.
+</ResponseField>
+
+<ResponseField name="collateralToken" type="string">
+  Contract ID of the pledged collateral token.
+</ResponseField>
+
+<ResponseField name="collateralAmount" type="bigint">
+  Locked collateral amount.
+</ResponseField>
+
+<ResponseField name="borrowedToken" type="string">
+  Contract ID of the borrowed stablecoin.
+</ResponseField>
+
+<ResponseField name="borrowedAmount" type="bigint">
+  Borrowed amount in the stablecoin's precision.
+</ResponseField>
+
+<ResponseField name="ltvBps" type="number">
+  The LTV (in basis points) locked in at loan open time. This value does not change if the vault's global LTV config is updated later.
+</ResponseField>
+
+<ResponseField name="openedAt" type="bigint">
+  Unix timestamp when the loan was opened.
+</ResponseField>
+
+<ResponseField name="status" type="LoanStatus">
+  `OPEN (0)` · `REPAID (1)` · `LIQUIDATED (2)`
+</ResponseField>
+
+```typescript
+import { LoanStatus } from "@ankarachain/sdk";
+
+const loan = await vault.getLoan(loanId);
+
+if (loan.status === LoanStatus.OPEN) {
+  console.log("Collateral locked:", loan.collateralAmount);
+  console.log("Outstanding debt:", loan.borrowedAmount);
+}
+```
+
+---
+
+### `getBorrowerLoans`
+
+```typescript
+getBorrowerLoans(borrower?: string): Promise<number[]>
+```
+
+Returns an array of loan IDs associated with the given borrower. If `borrower` is omitted, defaults to the connected signer's own loans.
+
+<ParamField path="borrower" type="string">
+  Optional wallet address to query. Defaults to the connected signer.
+</ParamField>
+
+```typescript
+const myLoanIds = await vault.getBorrowerLoans();
+const theirLoans = await vault.getBorrowerLoans("GBORROWERSTELLARADDRESS...");
+```
+
+---
+
+### `currentLtvBps`
+
+```typescript
+currentLtvBps(loanId: number): Promise<number>
+```
+
+Returns the **live**, oracle-priced current LTV of an open loan in basis points. This differs from `loan.ltvBps` — it recalculates using the latest oracle price, so it changes as the collateral token's value moves.
+
+<ParamField path="loanId" type="number" required>
+  The open loan ID.
+</ParamField>
+
+```typescript
+const ltv = await vault.currentLtvBps(loanId);
+console.log(`Current LTV: ${ltv / 100}%`);
+
+const threshold = await vault.getLiquidationThresholdBps();
+if (ltv > threshold) {
+  console.warn("Loan is undercollateralized and can be liquidated.");
+}
+```
+
+---
+
+### `isLiquidatable`
+
+```typescript
+isLiquidatable(loanId: number): Promise<boolean>
+```
+
+Returns `true` if the loan's live LTV has crossed the liquidation threshold and can be liquidated.
+
+---
+
+### `getBorrowedToken`
+
+```typescript
+getBorrowedToken(): Promise<string>
+```
+
+Returns the contract ID of the stablecoin the vault lends out. This is a vault-level constant, not per-loan.
+
+---
+
+### `getOracle`
+
+```typescript
+getOracle(): Promise<string>
+```
+
+Returns the contract ID of the price oracle the vault uses to value collateral.
+
+---
+
+### `getLtvBps`
+
+```typescript
+getLtvBps(): Promise<number>
+```
+
+Returns the vault's current maximum LTV in basis points (e.g. `6000` = 60%).
+
+---
+
+### `getLiquidationThresholdBps`
+
+```typescript
+getLiquidationThresholdBps(): Promise<number>
+```
+
+Returns the liquidation threshold in basis points. When a loan's `currentLtvBps` exceeds this value, anyone can call `liquidate`.
+
+---
+
+### `isPaused`
+
+```typescript
+isPaused(): Promise<boolean>
+```
+
+Returns `true` if the vault has been administratively paused. Paused vaults reject new loan opens, repayments, and liquidations.
+
+---
+
+## Admin Methods
+
+These methods require the vault's admin/manager role.
+
+### `setLtvBps`
+
+```typescript
+setLtvBps(newLtvBps: number): Promise<string>
+```
+
+Updates the vault's maximum LTV for new loans. Existing loans retain their original locked-in LTV.
+
+<ParamField path="newLtvBps" type="number" required>
+  New maximum LTV in basis points, e.g. `5000` for 50%.
+</ParamField>
+
+---
+
+### `setLiquidationThresholdBps`
+
+```typescript
+setLiquidationThresholdBps(newThresholdBps: number): Promise<string>
+```
+
+Updates the LTV threshold at which loans become liquidatable.
+
+<ParamField path="newThresholdBps" type="number" required>
+  New liquidation threshold in basis points. Should be higher than `ltvBps` to give borrowers a buffer.
+</ParamField>
+
+---
+
+### `setOracle`
+
+```typescript
+setOracle(oracleAddress: string): Promise<string>
+```
+
+Replaces the price oracle used to value collateral.
+
+<ParamField path="oracleAddress" type="string" required>
+  Soroban contract ID of the new oracle.
+</ParamField>
+
+---
+
+### `pause`
+
+```typescript
+pause(): Promise<string>
+```
+
+Pauses all vault operations.
+
+---
+
+### `unpause`
+
+```typescript
+unpause(): Promise<string>
+```
+
+Resumes vault operations.
+
+---
+
+## Properties
+
+```typescript
+vault.address  // The vaultAddress passed to the constructor
+```
+
+---
+
+## Full Example
+
+```typescript
+import { TokenFactory, CollateralVault, LoanStatus } from "@ankarachain/sdk";
+
+const factory = new TokenFactory({
+  network:          "stellar-testnet",
+  stellarSecretKey: process.env.STELLAR_SECRET!,
+});
+
+const vault = new CollateralVault(factory.adapter, process.env.VAULT_CONTRACT_ID!);
+
+// ── Check vault config ───────────────────────────────────────────────────
+const maxLtv       = await vault.getLtvBps();
+const liquidThresh = await vault.getLiquidationThresholdBps();
+console.log(`Max LTV: ${maxLtv / 100}% — Liquidation at: ${liquidThresh / 100}%`);
+
+// ── Open a loan ──────────────────────────────────────────────────────────
+const { loanId } = await vault.openLoan(
+  process.env.FARMLAND_TOKEN_CONTRACT_ID!,
+  1_000n * 10_000_000n,  // 1,000 tokens
+  500n  * 10_000_000n    // 500 USDC (50% LTV)
+);
+
+// ── Monitor live LTV ─────────────────────────────────────────────────────
+const liveLtv = await vault.currentLtvBps(loanId);
+console.log(`Live LTV: ${liveLtv / 100}%`);
+
+// ── Repay ────────────────────────────────────────────────────────────────
+const txHash = await vault.repayLoan(loanId);
+console.log("Repaid. Tx:", txHash);
+
+const loan = await vault.getLoan(loanId);
+console.log("Loan status:", LoanStatus[loan.status]); // "REPAID"
+```
+
+---
+
+## Type Reference
+
+```typescript
+enum LoanStatus {
+  OPEN       = 0,
+  REPAID     = 1,
+  LIQUIDATED = 2,
+}
+
+interface Loan {
+  borrower:         string;
+  collateralToken:  string;
+  collateralAmount: bigint;
+  borrowedToken:    string;
+  borrowedAmount:   bigint;
+  /** LTV at open time — locked in. Does not update when the vault's global LTV config changes. */
+  ltvBps:           number;
+  openedAt:         bigint;
+  status:           LoanStatus;
+}
+```

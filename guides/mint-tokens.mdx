@@ -1,0 +1,193 @@
+---
+title: "Mint and Transfer RWA Tokens to Investors"
+sidebarTitle: "Mint Tokens"
+description: "Learn how to mint fractional token shares to investor addresses and manage transfers using the Ankara Chain CLI and SDK."
+---
+
+Ankara Chain RWA tokens are ERC-20 (or Soroban SEP-41) contracts, so every token represents a fractional share of the underlying real-world asset. When you deploy a token with `TokenFactory`, the contract starts with a zero total supply and a status of `DRAFT`. Minting moves shares into investor wallets and, on first mint, transitions the token to `ACTIVE` — signalling that the asset is live and tradeable. You can also mint additional shares to an already-`ACTIVE` token, for example when a farmland holding expands or new investors are admitted.
+
+---
+
+## Mint via the CLI
+
+The fastest way to mint during development is the interactive `ankara mint` command. It reads your deployed contracts from `ankara.config.json` and prompts for the recipient and amount:
+
+```bash
+ankara mint
+```
+
+<Steps>
+  <Step title="Select token">
+    If you have multiple deployed tokens, the CLI lists them. Choose the one you want to mint from.
+  </Step>
+  <Step title="Enter recipient address">
+    Provide the investor's EVM address (`0x...`) or Stellar public key (`G...`).
+  </Step>
+  <Step title="Enter amount">
+    Enter the number of tokens in whole units (e.g. `1000`). The CLI converts this to wei (`1000 * 10^18`) before broadcasting.
+  </Step>
+  <Step title="Confirm and broadcast">
+    Review the summary and press Enter. The tx hash and (on Polygon Amoy) an explorer link are printed when the transaction confirms.
+  </Step>
+</Steps>
+
+You can also pass flags to skip the prompts:
+
+```bash
+ankara mint \
+  --contract 0xYourTokenAddress \
+  --to 0xInvestorAddress \
+  --amount 1000
+```
+
+---
+
+## Mint via the SDK
+
+Use `AssetRegistry.mint()` to call the token contract directly from TypeScript. This is the same call the CLI makes under the hood.
+
+```typescript
+import { AssetRegistry } from "@ankarachain/sdk";
+import { ethers } from "ethers";
+
+// Build an adapter from your existing factory (or build one directly)
+const registry = new AssetRegistry(
+  factory.adapter,          // IAdapter — EVMAdapter or StellarAdapter
+  "0xYourTokenAddress",
+  "farmland"                // must match the deployed template
+);
+
+const txHash = await registry.mint(
+  "0xInvestorAddress",
+  ethers.parseEther("1000")   // 1 000 tokens — always pass as a bigint in wei
+);
+
+console.log("Mint tx:", txHash);
+```
+
+`registry.mint()` accepts any EVM address or Stellar public key for `to`, and a `bigint` for `amount`. The amount is always 18-decimal fixed-point, so use `ethers.parseEther()` for human-readable values.
+
+<Note>
+  The connected signer (or `stellarSecretKey`) must hold the `MINTER_ROLE` on the token contract. If you deployed the token yourself, your address is the admin and has this role automatically.
+</Note>
+
+---
+
+## Batch minting via the CLI
+
+To distribute tokens to many investor wallets in one step, use `ankara batch-mint`. Provide a CSV file with one `address,amount` pair per line:
+
+```bash
+ankara batch-mint \
+  --contract 0xYourTokenAddress \
+  --file ./investors.csv
+```
+
+Example `investors.csv`:
+
+```csv
+0xAlice000000000000000000000000000000000001,500
+0xBob0000000000000000000000000000000000001,250
+0xCarol00000000000000000000000000000000001,250
+```
+
+The command sends one transaction per row and prints the tx hash for each. Use this for investor onboarding flows where individual recipients are known upfront.
+
+---
+
+## Transfer management and permissioned transfers
+
+By default, Ankara Chain tokens are freely transferable between any addresses. You can gate transfers so that only KYC-verified addresses can receive tokens by attaching a `WhitelistVerifier` contract to the token.
+
+When a verifier is set on the token contract, any transfer to an un-verified address reverts on-chain. Set the verifier address when you deploy — pass `identityVerifier` in your deploy options — or update it later through `AssetRegistry`:
+
+```typescript
+// Attach a verifier after deployment
+await registry.setIdentityVerifier("0xWhitelistVerifierAddress");
+
+// Remove KYC gating (pass zero address)
+await registry.setIdentityVerifier(ethers.ZeroAddress);
+```
+
+To read the currently-attached verifier:
+
+```typescript
+const verifier = await registry.getIdentityVerifier();
+console.log("Verifier:", verifier);
+// "0x0000000000000000000000000000000000000000" means no gating
+```
+
+<Tip>
+  If your platform already manages a KYC list off-chain, deploy a `WhitelistVerifier` that reads from that list and attach it to every token at deploy time. Investors who pass KYC are whitelisted on-chain once, then can receive any token from your factory without further action.
+</Tip>
+
+---
+
+## Checking balances
+
+### Via AssetRegistry
+
+```typescript
+const balance: bigint = await registry.getBalanceOf("0xInvestorAddress");
+console.log("Balance:", ethers.formatEther(balance), "tokens");
+```
+
+### Via the useTokenBalance React hook
+
+In a React or Next.js application, use the `useTokenBalance` hook — no signer required:
+
+```tsx
+import { useTokenBalance } from "@ankarachain/sdk/react";
+
+function InvestorBalance({ tokenAddress, walletAddress }: {
+  tokenAddress: string;
+  walletAddress: string;
+}) {
+  const { formatted, isLoading, error } = useTokenBalance({
+    tokenAddress,
+    walletAddress,
+    network: "polygon-amoy",
+  });
+
+  if (isLoading) return <span>Loading…</span>;
+  if (error)     return <span>Error: {error.message}</span>;
+
+  return <span>{formatted} tokens</span>;
+}
+```
+
+See the [React Hooks guide](/guides/react-hooks) for full usage details.
+
+---
+
+## Token lifecycle
+
+Minting interacts with the `AssetStatus` enum that every Ankara Chain token carries on-chain:
+
+| Status        | Meaning                                                        |
+|---------------|----------------------------------------------------------------|
+| `DRAFT` (0)   | Deployed, zero supply, not yet live                            |
+| `ACTIVE` (1)  | At least one mint has occurred — token is tradeable            |
+| `SUSPENDED` (2) | Transfers paused by the admin                                |
+| `REDEEMED` (3)  | Underlying asset redeemed — token is retired                 |
+| `EXPIRED` (4)   | Commodity or license has expired                             |
+
+The first `mint()` call automatically transitions the token from `DRAFT` to `ACTIVE`. Subsequent mints on an already-`ACTIVE` token do not change its status. You can also read and update the status directly:
+
+```typescript
+import { AssetStatus } from "@ankarachain/sdk";
+
+// Read current status
+const status = await registry.getStatus();
+console.log("Status:", AssetStatus[status]); // "DRAFT" | "ACTIVE" | ...
+
+// Suspend trading (e.g. during a compliance review)
+await registry.setStatus(AssetStatus.SUSPENDED);
+
+// Reactivate
+await registry.setStatus(AssetStatus.ACTIVE);
+```
+
+<Warning>
+  Setting status to `REDEEMED` is irreversible on-chain. Confirm the real-world asset has been fully wound down before calling `setStatus(AssetStatus.REDEEMED)`.
+</Warning>

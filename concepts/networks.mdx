@@ -1,0 +1,128 @@
+---
+title: "Supported Networks for RWA Token Deployment"
+sidebarTitle: "Networks"
+description: "Deploy Ankara Chain RWA tokens on Polygon, Ethereum, BNB Chain, Celo, or Stellar. Each network has pre-configured RPC endpoints and chain IDs."
+---
+
+Ankara Chain supports deployment to five EVM-compatible mainnets, one EVM testnet, and two Stellar networks (mainnet and testnet). Each network has a pre-configured RPC endpoint, chain ID, and block explorer URL baked into the SDK — you only need to supply a network name in your config and a signer with funds.
+
+## EVM Networks
+
+Pass any of these `SupportedNetwork` string literals as the `network` field in your `EVMAnkaraChainConfig`.
+
+| Network | `SupportedNetwork` value | Chain ID | Type | Notes |
+|---|---|---|---|---|
+| Polygon Mainnet | `"polygon"` | `137` | Mainnet | Recommended for most production deployments — low fees, large ecosystem |
+| Polygon Amoy | `"polygon-amoy"` | `80002` | Testnet | Polygon's current public testnet; replaces Mumbai |
+| Ethereum Mainnet | `"ethereum"` | `1` | Mainnet | Highest security guarantees; highest gas costs |
+| BNB Smart Chain | `"bnb"` | `56` | Mainnet | Large retail and DeFi user base in West Africa |
+| Celo Mainnet | `"celo"` | `42220` | Mainnet | Mobile-first, stablecoin-native; popular in East Africa |
+| Hardhat Local | `"localhost"` | `31337` | Local | Local Hardhat node for development and testing |
+
+### Default RPC Endpoints
+
+The SDK ships the following public RPC URLs out of the box:
+
+| Network | Default RPC |
+|---|---|
+| `polygon` | `https://polygon-rpc.com` |
+| `polygon-amoy` | `https://rpc-amoy.polygon.technology` |
+| `ethereum` | `https://eth.llamarpc.com` |
+| `bnb` | `https://bsc-dataseed.binance.org` |
+| `celo` | `https://forno.celo.org` |
+| `localhost` | `http://127.0.0.1:8545` |
+
+<Note>
+  Public RPC endpoints are rate-limited and unsuitable for high-throughput production workloads. Override the default RPC for any network using the `rpcUrl` field in your config — see [Custom RPC](#custom-rpc) below.
+</Note>
+
+---
+
+## Stellar Networks
+
+Ankara Chain supports Stellar via the Soroban smart contract platform. Pass either of these values as the `network` field in your `StellarAnkaraChainConfig`.
+
+| Network | `SupportedNetwork` value | Type | Soroban RPC | Explorer |
+|---|---|---|---|---|
+| Stellar Mainnet | `"stellar"` | Mainnet | Must be overridden — no default public Soroban RPC for pubnet | [stellar.expert/explorer/public](https://stellar.expert/explorer/public) |
+| Stellar Testnet | `"stellar-testnet"` | Testnet | `https://soroban-testnet.stellar.org` | [stellar.expert/explorer/testnet](https://stellar.expert/explorer/testnet) |
+
+<Warning>
+  The `"stellar"` mainnet entry has **no default `rpcUrl`**. You must supply your own Soroban RPC endpoint via `rpcUrl` in your `StellarAnkaraChainConfig`. A hosted provider (such as a Stellar RPC node you operate) is required for mainnet deployments.
+</Warning>
+
+### Stellar Testnet Deployed Contract Addresses
+
+The following contracts are live on Stellar testnet and are pre-configured in the SDK when you use `"stellar-testnet"`. Override them with `factoryAddress`, `nftFactoryAddress`, etc. in your config if you've deployed your own instances.
+
+| Contract | Address |
+|---|---|
+| Token Factory | `CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF` |
+| NFT Factory | `CDAMIGCFMFM7O6Q6GYRZKOTZ67L74KGHMSW3IXEZNWWS3JLGHUSSLZC4` |
+| Multi-Token Factory | `CDT6IV4LVZCG55Z7AWLEROBGKYZKIFNGG2FEGNAYQKC735LDI5TSKVVM` |
+| Escrow Factory | `CDF5P3KOAU6RZGUSSA7KPNYEJMCBYAF5TVWELNFSVTM3TYP6EFUXRYVW` |
+| Ramp Settlement Factory | `CCLEC6AKC65VOIL6KMG52YR2Y2K4WHFMY62GX34NOXBKQZY4QJAIFUWC` |
+| Manual Oracle | `CD3I6U4XHTCCSPHAVR44SD3I2D3MATSMNVBORGWXYL6FMQJPDUOSRS56` |
+| Collateral Vault | `CDIUS3CGVFJONWUK3SCK4RFFONENSJ6QRZLNOHHO7EMVPZCCQ3IUSVNB` |
+
+The Collateral Vault is configured with 60% LTV and a 75% liquidation threshold against native XLM as the demo borrowed asset. The Manual Oracle is pre-seeded for testnet price feeds.
+
+---
+
+## Choosing a Network
+
+<AccordionGroup>
+  <Accordion title="When to use Polygon">
+    Polygon is the recommended starting point for most production RWA deployments. Transaction fees are low (typically fractions of a cent), the ecosystem has deep stablecoin liquidity (USDC, USDT), and it has broad wallet support. Use `"polygon-amoy"` for testing before promoting to `"polygon"`.
+  </Accordion>
+  <Accordion title="When to use Stellar">
+    Choose Stellar if your use case requires fast, low-cost cross-border stablecoin settlement (e.g. USDC via Circle's Stellar integration), or if you're building for users in markets where Stellar-based mobile wallets are prevalent. Stellar also provides the Collateral Vault and on/off-ramp settlement contract out of the box on testnet. Note that the Stellar adapter requires a Soroban RPC endpoint you control for mainnet.
+  </Accordion>
+  <Accordion title="When to use Celo">
+    Celo is worth considering for East Africa deployments where mobile-money-to-stablecoin flows are important. Celo's native stablecoin ecosystem (cUSD, cKES) aligns well with Kenyan market use cases. Its EVM compatibility means the Ankara Chain EVM contracts deploy unchanged.
+  </Accordion>
+  <Accordion title="When to use Ethereum">
+    Ethereum mainnet provides the highest settlement finality guarantees and the broadest institutional DeFi integrations. Gas costs are significantly higher than Polygon or Celo. Use Ethereum if your counterparties require it for regulatory or institutional reasons, or if you need deep liquidity for secondary market trading.
+  </Accordion>
+  <Accordion title="When to use localhost">
+    Use `"localhost"` during development and automated testing. Run a local Hardhat node with `npm run node` in `packages/contracts-evm`, deploy the factory with `npm run deploy:local`, and point your SDK config at `http://127.0.0.1:8545`. No real funds required.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Custom RPC
+
+Override the SDK's default RPC endpoint by supplying `rpcUrl` in your config object. This applies to both EVM and Stellar networks.
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+import { ethers } from "ethers";
+
+// EVM — override with a private Alchemy or Infura endpoint
+const provider = new ethers.JsonRpcProvider(
+  `https://polygon-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+);
+const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+
+const factory = new TokenFactory({
+  network: "polygon",
+  signer,
+  rpcUrl: `https://polygon-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+});
+```
+
+```typescript
+import { TokenFactory } from "@ankarachain/sdk";
+
+// Stellar mainnet — rpcUrl is required; there is no SDK default
+const factory = new TokenFactory({
+  network: "stellar",
+  stellarSecretKey: process.env.STELLAR_SECRET!,
+  rpcUrl: "https://your-soroban-rpc-node.example.com",
+});
+```
+
+<Tip>
+  For Stellar testnet development, the default `rpcUrl` (`https://soroban-testnet.stellar.org`) is sufficient and no override is needed.
+</Tip>

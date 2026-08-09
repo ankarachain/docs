@@ -1,0 +1,211 @@
+---
+title: "MilestoneEscrow Contract: Tranche-Based Payment Architecture"
+sidebarTitle: "Escrow Contract"
+description: "MilestoneEscrow holds funds in trust until each milestone is delivered and approved — with optional arbiter and timelock-based refund protection."
+---
+
+`MilestoneEscrow` is a per-deal smart contract that holds stablecoins in trust and releases them tranche by tranche as work is delivered and approved. It is designed for trade finance, project contracts, and any multi-stage payment agreement where the payer and payee benefit from an on-chain neutral party holding funds. Each escrow is its own deployed contract — deployed by `EscrowFactory` — and is independent of all other escrows on the same network.
+
+The contract is available on both chains:
+
+| Chain | Contract | Deployed via |
+|---|---|---|
+| EVM (Solidity) | `MilestoneEscrow.sol` | `EscrowFactory` (EVM) |
+| Stellar (Soroban) | `milestone-escrow` Soroban contract | `EscrowFactory` (Stellar testnet: `CDF5P3KOAU6RZGUSSA7KPNYEJMCBYAF5TVWELNFSVTM3TYP6EFUXRYVW`) |
+
+---
+
+## Contract architecture
+
+`EscrowFactory` deploys a new `MilestoneEscrow` contract for each deal. The factory maintains a whitelist of accepted stablecoins — only tokens on this list can be used as the escrow's payment token. The `EscrowManager` SDK class wraps `EscrowFactory` and provides typed deploy, fund, and lifecycle methods.
+
+Each escrow holds:
+- A fixed set of milestones defined at deployment (amounts and description hashes)
+- A single ERC-20 / SEP-41 stablecoin as the payment token
+- References to the `payer`, `payee`, optional `arbiter`, and optional `identityVerifier`
+- A `timelockDurationSeconds` window that protects the payee from indefinite payer inaction
+
+---
+
+## Roles
+
+| Role | Address | Permissions |
+|---|---|---|
+| **Payer** | Set at deployment | `fund(milestoneId)`, `approveMilestone(milestoneId)`, `raiseDispute(milestoneId)`, `voteCancel()` |
+| **Payee** | Set at deployment | `markDelivered(milestoneId)`, `claimTimelockRelease(milestoneId)`, `voteCancel()` |
+| **Arbiter** | Optional — `address(0)` if not set | `resolveDispute(milestoneId, releaseToPayee)` |
+| **Admin** | Set at deployment (defaults to deployer) | `setArbiter(newArbiter)`, `setIdentityVerifier(verifier)`, `pause/unpause` |
+
+---
+
+## Milestone state machine
+
+Each milestone moves through the following states independently. Other milestones in the same escrow are unaffected by a dispute or delivery on one.
+
+```
+PENDING (0)
+    │
+    ├──[payer: fund()]──────────────────────────────────────┐
+    │                                                       │
+    └──[payee: markDelivered()]──────► DELIVERED (1)        │
+                                          │                 │
+                           ┌─────────────┴────────────┐    │
+                           │                          │    │
+             [payer: approveMilestone()]  [payer: raiseDispute()]
+                           │                          │
+                           ▼                     DISPUTED (2)
+                      RELEASED (3)                    │
+                                         ┌────────────┴────────────┐
+                                         │                         │
+                           [arbiter: resolve(true)]   [arbiter: resolve(false)]
+                                         │                         │
+                                    RELEASED (3)             REFUNDED (4)
+
+         Also from DELIVERED:
+         [after timelockDurationSeconds, payee: claimTimelockRelease()]
+                                         │
+                                    RELEASED (3)
+```
+
+In TypeScript, the state values are the `MilestoneStatus` enum:
+
+```typescript
+import { MilestoneStatus } from "@ankarachain/sdk";
+
+// MilestoneStatus.PENDING   = 0
+// MilestoneStatus.DELIVERED = 1
+// MilestoneStatus.DISPUTED  = 2
+// MilestoneStatus.RELEASED  = 3
+// MilestoneStatus.REFUNDED  = 4
+```
+
+---
+
+## Funding model
+
+Milestones are funded independently. The payer does **not** need to fund the entire deal upfront — they can deposit one tranche at a time as each milestone begins. This reduces counterparty risk for the payer:
+
+```typescript
+import { EscrowManager } from "@ankarachain/sdk";
+
+const escrow = new EscrowManager({
+  network: "polygon-amoy",
+  signer: payerWallet,
+});
+
+// Fund only milestone 0 today
+await escrow.fundMilestone(escrowAddress, 0);
+
+// Fund milestone 1 when work on it begins
+await escrow.fundMilestone(escrowAddress, 1);
+```
+
+A `funded: boolean` field on each `Milestone` struct tracks whether that specific tranche has been deposited.
+
+---
+
+## Timelock protection
+
+After a payee calls `markDelivered(milestoneId)`, the milestone enters `DELIVERED` state. If the payer neither approves nor disputes within `timelockDurationSeconds`, the payee can call `claimTimelockRelease(milestoneId)` to collect the funds unilaterally.
+
+The default `timelockDurationSeconds` is **7 days** on-chain when `0` is passed at deployment. You can set a custom window via `DeployEscrowOptions.timelockDurationSeconds`:
+
+```typescript
+const result = await escrow.deployEscrow({
+  payer: "0xPayerAddress",
+  payee: "0xPayeeAddress",
+  token: "0xUSDCAddress",
+  milestones: [
+    { amount: BigInt("500000000"), descriptionHash: "0x..." },
+    { amount: BigInt("500000000"), descriptionHash: "0x..." },
+  ],
+  timelockDurationSeconds: 14 * 24 * 60 * 60, // 14 days
+  arbiter: "0xArbiterAddress",
+});
+```
+
+---
+
+## Dispute flow
+
+If the payer believes a milestone was not delivered to specification, they can open a dispute:
+
+1. **Payer calls `raiseDispute(milestoneId)`** → milestone moves to `DISPUTED`.
+2. **Arbiter reviews** off-chain evidence (delivery proof, contract terms).
+3. **Arbiter calls `resolveDispute(milestoneId, releaseToPayee)`**:
+   - `true` → funds released to payee (milestone → `RELEASED`)
+   - `false` → funds refunded to payer (milestone → `REFUNDED`)
+
+<Warning>
+  If no `arbiter` was set at deployment (`address(0)`), disputes cannot be resolved on-chain. Both parties must reach off-chain agreement and use the cancel mechanism, or one party must re-deploy the escrow with an arbiter. Always set an arbiter for high-value deals.
+</Warning>
+
+---
+
+## Cancellation
+
+Both the payer and payee can vote to cancel a deal:
+
+1. Either party calls `voteCancel()`.
+2. Once **both** parties have voted, and no milestones remain in a `DELIVERED` or `DISPUTED` state that could still release funds, the deal is cancelled.
+3. Any funded but unreleased milestone amounts are refunded to the payer.
+4. The contract emits `EscrowCancelled(uint256 refundedAmount)`.
+
+---
+
+## `EscrowDeployResult`
+
+The object returned by `EscrowManager.deployEscrow()`:
+
+```typescript
+export interface EscrowDeployResult {
+  escrowAddress: string;    // address of the newly deployed MilestoneEscrow contract
+  txHash: string;           // deployment transaction hash
+  payer: string;
+  payee: string;
+  token: string;            // stablecoin ERC-20/SEP-41 address
+  totalAmount: bigint;      // sum of all milestone amounts
+  network: SupportedNetwork;
+  deployedAt: number;       // unix seconds
+}
+```
+
+---
+
+## Full example
+
+```typescript
+import { EscrowManager, MilestoneStatus } from "@ankarachain/sdk";
+import { Wallet, ethers } from "ethers";
+
+const manager = new EscrowManager({
+  network: "polygon-amoy",
+  signer: new Wallet(process.env.PRIVATE_KEY!),
+});
+
+// 1. Deploy a 2-milestone escrow
+const { escrowAddress } = await manager.deployEscrow({
+  payer:   "0xPayerAddress",
+  payee:   "0xPayeeAddress",
+  token:   "0xUSDCAddress",
+  arbiter: "0xArbiterAddress",
+  milestones: [
+    { amount: ethers.parseUnits("1000", 6) }, // $1 000 USDC
+    { amount: ethers.parseUnits("1000", 6) }, // $1 000 USDC
+  ],
+  timelockDurationSeconds: 7 * 24 * 60 * 60,
+});
+
+// 2. Payer funds milestone 0
+await manager.fundMilestone(escrowAddress, 0);
+
+// 3. Payee marks it delivered
+await manager.markDelivered(escrowAddress, 0);
+
+// 4. Payer approves — funds released to payee
+await manager.approveMilestone(escrowAddress, 0);
+
+// 5. Check milestone state
+const milestone = await manager.getMilestone(escrowAddress, 0);
+console.log(milestone.status === MilestoneStatus.RELEASED); // true
+```

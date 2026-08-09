@@ -1,0 +1,143 @@
+---
+title: "Stellar Soroban Contracts: Deployed on Stellar Testnet"
+sidebarTitle: "Stellar Contracts"
+description: "Ankara Chain's Rust/Soroban contracts mirror the EVM contract suite and are live on Stellar testnet — use the same SDK API for both chains."
+---
+
+Ankara Chain's Stellar contracts are written in Rust and compiled to WebAssembly for deployment on the Stellar network via Soroban (Stellar's smart contract platform). They mirror the functionality of the EVM contract suite — the same six asset templates, the same factory architecture, the same escrow and ramp settlement contracts — but are implemented as Soroban contracts invokable with the Stellar SDK. All testnet contracts are live and verified on-chain.
+
+---
+
+## Deployed testnet addresses
+
+These contracts are live on Stellar testnet as of July 14, 2026. Deployer: `GAF4RGTNO2HKR754HDQRK4UZCPDN7F3T7QPZQE76UAJZSUUDICD43JPS`.
+
+| Contract | Soroban Contract ID |
+|---|---|
+| Token Factory | `CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF` |
+| NFT Factory | `CDAMIGCFMFM7O6Q6GYRZKOTZ67L74KGHMSW3IXEZNWWS3JLGHUSSLZC4` |
+| Multi-Token Factory | `CDT6IV4LVZCG55Z7AWLEROBGKYZKIFNGG2FEGNAYQKC735LDI5TSKVVM` |
+| Escrow Factory | `CDF5P3KOAU6RZGUSSA7KPNYEJMCBYAF5TVWELNFSVTM3TYP6EFUXRYVW` |
+| Ramp Settlement Factory | `CCLEC6AKC65VOIL6KMG52YR2Y2K4WHFMY62GX34NOXBKQZY4QJAIFUWC` |
+| Manual Oracle | `CD3I6U4XHTCCSPHAVR44SD3I2D3MATSMNVBORGWXYL6FMQJPDUOSRS56` |
+| Collateral Vault | `CDIUS3CGVFJONWUK3SCK4RFFONENSJ6QRZLNOHHO7EMVPZCCQ3IUSVNB` |
+
+<Note>
+  The Collateral Vault's borrowed asset on testnet is the native XLM Stellar Asset Contract (SAC): `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`. This is a testnet demo stand-in only. The vault is configured at 60% LTV and a 75% liquidation threshold.
+</Note>
+
+You can inspect all contracts on the Stellar testnet explorer:
+**[stellar.expert/explorer/testnet](https://stellar.expert/explorer/testnet)**
+
+---
+
+## SDK parity with EVM
+
+`StellarAdapter` implements the same `IAdapter` interface as `EVMAdapter`. This means `TokenFactory`, `AssetRegistry`, `EscrowManager`, `RampManager`, and `CollateralVault` work identically regardless of which chain you configure — swap `network: "polygon"` for `network: "stellar-testnet"` and the same application code runs on Stellar.
+
+```typescript
+// EVM
+import { TokenFactory } from "@ankarachain/sdk";
+import { Wallet } from "ethers";
+
+const evmFactory = new TokenFactory({
+  network: "polygon-amoy",
+  signer: new Wallet(process.env.PRIVATE_KEY!),
+});
+
+// Stellar — same API, different config
+const stellarFactory = new TokenFactory({
+  network: "stellar-testnet",
+  stellarSecretKey: process.env.STELLAR_SECRET_KEY!,
+});
+
+// Both calls use the same method signature:
+const result = await stellarFactory.deployFarmland({
+  name: "Kaduna Farmland Token",
+  symbol: "KFT",
+  assetId: "0x...",
+  countryCode: "NG",
+  metadata: { ... },
+});
+
+console.log(result.tokenAddress); // Soroban contract ID on Stellar
+```
+
+---
+
+## Stellar-specific authentication
+
+### Server-side: `stellarSecretKey`
+
+For CLI scripts, backend services, and CI/CD pipelines, pass your Stellar secret seed (starts with `S`) directly:
+
+```typescript
+const factory = new TokenFactory({
+  network: "stellar-testnet",
+  stellarSecretKey: process.env.STELLAR_SECRET_KEY!, // "SABC..."
+});
+```
+
+<Warning>
+  Never expose `stellarSecretKey` in a browser application, client-side bundle, or any code that runs on untrusted machines. Use `stellarSigner` with Freighter in all browser contexts.
+</Warning>
+
+### Browser: `stellarSigner` with Freighter
+
+For frontend applications, pass a `StellarExternalSigner` that wraps the Freighter wallet API. Freighter's object matches the `StellarExternalSigner` shape exactly:
+
+```typescript
+import { isConnected, getPublicKey, signTransaction } from "@stellar/freighter-api";
+
+if (await isConnected()) {
+  const publicKey = await getPublicKey();
+
+  const factory = new TokenFactory({
+    network: "stellar-testnet",
+    stellarSigner: {
+      publicKey,
+      signTransaction, // Freighter's signTransaction matches SignTransaction from @stellar/stellar-sdk/contract
+    },
+  });
+}
+```
+
+The Freighter wallet prompts the user to sign each transaction in-browser. The secret key never touches your application.
+
+---
+
+## Soroban RPC endpoint
+
+The built-in testnet RPC is `https://soroban-testnet.stellar.org`. For Stellar Mainnet, there is no official free public Soroban RPC — you must supply your own:
+
+```typescript
+const factory = new TokenFactory({
+  network: "stellar",
+  stellarSecretKey: process.env.STELLAR_SECRET_KEY!,
+  rpcUrl: "https://your-soroban-rpc-provider.example.com",
+});
+```
+
+---
+
+## Overriding factory addresses
+
+The testnet factory addresses are built into the SDK defaults for `stellar-testnet`. If you deploy your own factory contracts (e.g. for a private Stellar network or after a new testnet reset), pass them explicitly:
+
+```typescript
+const factory = new TokenFactory({
+  network: "stellar-testnet",
+  stellarSecretKey: process.env.STELLAR_SECRET_KEY!,
+  factoryAddress:         "C...",   // Your Token Factory contract ID
+  nftFactoryAddress:      "C...",
+  escrowFactoryAddress:   "C...",
+});
+```
+
+---
+
+## Source code
+
+The Stellar contracts live in `packages/contracts-stellar` in the open-source repository. The deployment script is `scripts/deploy-testnet.sh` and the machine-readable deployment record is `deployments.testnet.json`.
+
+**[github.com/ankarachain/ankara-core/tree/main/packages/contracts-stellar](https://github.com/ankarachain/ankara-core/tree/main/packages/contracts-stellar)**
