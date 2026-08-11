@@ -3,8 +3,8 @@
   "name": "Ankara Chain",
   "theme": "mint",
   "colors": {
-    "primary": "#F0B429",
-    "light": "#123A22",
+    "primary": "#123A22",
+    "light": "#F0B429",
     "dark": "#123A22"
   },
   "logo": {
