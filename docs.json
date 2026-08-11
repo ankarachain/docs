@@ -18,14 +18,12 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Documentation",
+        "tab": "Concepts & Examples",
         "groups": [
           {
             "group": "Get Started",
             "pages": [
-              "introduction",
-              "quickstart",
-              "quickstart-stellar"
+              "introduction"
             ]
           },
           {
@@ -60,6 +58,18 @@
               "mcp/overview"
             ]
           }
+        ]
+      },
+      {
+        "tab": "Stellar (Soroban)",
+        "pages": [
+          "quickstart-stellar"
+        ]
+      },
+      {
+        "tab": "EVM",
+        "pages": [
+          "quickstart"
         ]
       },
       {
