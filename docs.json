@@ -1,17 +1,20 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "name": "PIE Drops",
-  "theme": "luma",
+  "name": "Ankara Chain",
+  "theme": "mint",
   "colors": {
     "primary": "#7c7c7c",
     "light": "#0d0d0d",
     "dark": "#eadcda"
   },
   "logo": {
-    "light": "https://media.brand.dev/8e143391-a88c-4972-be95-da2d8f5021fc.svg",
-    "dark": "https://media.brand.dev/8e143391-a88c-4972-be95-da2d8f5021fc.svg"
+    "light": "/images/ankara-lockup-horizontal-dark.png",
+    "dark": "/images/ankara-lockup-horizontal-light.png"
   },
-  "favicon": "https://media.brand.dev/2c824f92-87e6-4a35-8582-6f382be609f8.svg",
+  "favicon": {
+    "light": "/images/ankara-favicon.svg",
+    "dark": "/images/ankara-mark-forest.svg"
+  },
   "navigation": {
     "tabs": [
       {
@@ -120,5 +123,8 @@
     "socials": {
       "github": "https://github.com/ankarachain/ankara-core"
     }
+  },
+  "icons": {
+    "library": "lucide"
   }
 }
