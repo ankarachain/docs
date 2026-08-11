@@ -61,13 +61,13 @@
         ]
       },
       {
-        "tab": "Stellar (Soroban)",
+        "tab": "Stellar Guide",
         "pages": [
           "quickstart-stellar"
         ]
       },
       {
-        "tab": "EVM",
+        "tab": "EVM Guide",
         "pages": [
           "quickstart"
         ]
