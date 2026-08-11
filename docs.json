@@ -3,9 +3,9 @@
   "name": "Ankara Chain",
   "theme": "mint",
   "colors": {
-    "primary": "#7c7c7c",
-    "light": "#0d0d0d",
-    "dark": "#eadcda"
+    "primary": "#F0B429",
+    "light": "#F0B429",
+    "dark": "#123A22"
   },
   "logo": {
     "light": "/images/ankara-mark-forest.svg",
@@ -126,5 +126,11 @@
   },
   "icons": {
     "library": "lucide"
+  },
+  "background": {
+    "color": {
+      "light": "#EFEAE0",
+      "dark": "#060E09"
+    }
   }
 }
