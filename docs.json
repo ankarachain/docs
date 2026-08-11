@@ -8,8 +8,8 @@
     "dark": "#eadcda"
   },
   "logo": {
-    "light": "/images/ankara-lockup-horizontal-dark.png",
-    "dark": "/images/ankara-lockup-horizontal-light.png"
+    "light": "/images/ankara-mark-forest.svg",
+    "dark": "/images/ankara-favicon.svg"
   },
   "favicon": {
     "light": "/images/ankara-favicon.svg",
