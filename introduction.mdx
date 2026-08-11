@@ -10,12 +10,15 @@ description: "Ankara Chain lets you tokenize real-world assets on EVM chains and
   <Card title="EVM Quickstart" icon="rocket" href="/quickstart">
     Deploy your first token on Polygon Amoy testnet in under 30 minutes — no Solidity required.
   </Card>
+
   <Card title="Stellar Quickstart" icon="star" href="/quickstart-stellar">
     Deploy on Stellar Soroban testnet using the same SDK API as EVM chains.
   </Card>
+
   <Card title="Asset Templates" icon="layer-group" href="/concepts/asset-templates">
     Six pre-audited asset classes: farmland, commodity, real estate, invoice, carbon credit, mining rights.
   </Card>
+
   <Card title="CLI Reference" icon="terminal" href="/cli/commands">
     The `ankara` CLI scaffolds projects, deploys contracts, and mints tokens from your terminal.
   </Card>
@@ -27,17 +30,11 @@ description: "Ankara Chain lets you tokenize real-world assets on EVM chains and
 
 Ankara Chain sits between raw blockchain protocols and your product. You own the business layer — Ankara Chain provides the contract infrastructure and the TypeScript SDK that wraps it.
 
-```
-┌─────────────────────────────────────────┐
-│  End Users & Investors                  │  ← Farmers, businesses, diaspora
-├─────────────────────────────────────────┤
-│  Your Application                       │  ← Business logic, UX, compliance decisions
-├─────────────────────────────────────────┤
-│  Ankara Chain SDK          ← You are here│  ← Smart contracts, CLI, TypeScript API
-├─────────────────────────────────────────┤
-│  Blockchain Protocol                    │  ← Ethereum · Polygon · Stellar · Celo · BNB
-└─────────────────────────────────────────┘
-```
+| End Users & Investors | ←  Farmers, businesses, diaspora |
+| --- | --- |
+| Your Application | ←  Business logic, UX, compliance decisions |
+| **Ankara Chain SDK** | ←  Smart contracts, CLI, TypeScript API |
+| Blockchain Protocol | ←  Ethereum · Polygon · Stellar · Celo · BNB |
 
 The contracts deploy to your chosen network under **your deployer key** — Ankara Chain never holds custody of your assets or your infrastructure. The SDK's `TokenFactory` class is the primary entry point: it accepts an ethers.js `Signer` (EVM) or a Stellar secret key / Freighter wallet (Stellar), and exposes a unified `deployFarmland()`, `deployCommodity()`, `deployRealEstate()`, and similar methods regardless of which chain you target.
 
@@ -70,19 +67,19 @@ The contracts deploy to your chosen network under **your deployer key** — Anka
 Every module ships as part of the `@ankarachain/sdk` package and is MIT licensed unless noted.
 
 | Module | Description |
-|--------|-------------|
+| --- | --- |
 | **Token Factory** | Deploy RWA tokens from pre-audited ERC-20 templates. The `TokenFactory` class is your primary entry point — it handles provider setup, contract deployment, and result normalization across EVM chains and Stellar. |
 | **Asset Registry** | On-chain metadata schema and lifecycle management. Tracks each asset through `DRAFT → ACTIVE → SUSPENDED → REDEEMED/EXPIRED` states with the `AssetRegistry` class. |
 | **Transfer Engine** | Permissioned transfers, time-locks, and milestone-based escrow. The `MilestoneEscrow` contract lets you structure tranche payments tied to on-chain delivery confirmations. |
 | **Identity Hooks** | Pluggable KYC interface (`IIdentityVerifier`). Pass an `identityVerifier` address at deploy time to gate transfers behind your chosen verification provider without touching contract code. |
-| **Multi-Chain Adapter** | Unified EVM + Stellar API. The same `TokenFactory` method signatures work on Polygon, Celo, BNB Chain, and Stellar Soroban — the adapter layer handles the protocol differences. |
+| **Multi-Chain Adapter** | Unified EVM \+ Stellar API. The same `TokenFactory` method signatures work on Polygon, Celo, BNB Chain, and Stellar Soroban — the adapter layer handles the protocol differences. |
 
 ---
 
 ## Supported Chains
 
 | Chain | Network Type | Notes |
-|-------|-------------|-------|
+| --- | --- | --- |
 | **Ethereum** | EVM | Mainnet; highest liquidity for large institutional issuances |
 | **Polygon** | EVM | Low fees; recommended starting point for most African market deployments |
 | **BNB Chain** | EVM | Mainnet; strong retail penetration across West Africa |
