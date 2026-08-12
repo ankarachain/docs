@@ -1,0 +1,216 @@
+---
+title: "Build a Voluntary Carbon Credit Marketplace"
+sidebarTitle: "Carbon Credit Marketplace"
+description: "Build the bare bones of a carbon credit marketplace: issue a CarbonCreditToken per project, sell credits to corporate buyers, and retire them with an immutable on-chain public record."
+---
+
+A reforestation project in the Congo Basin generates verified carbon offsets. A corporate buyer in Lagos wants to retire ten tonnes of CO₂e against its Scope 1 emissions and needs a public, tamper-proof record it can cite in a sustainability report. This tutorial builds that flow: `CarbonCreditToken` issuance, a custodial purchase flow, and retirement with a queryable public registry.
+
+## What you'll build
+
+- An issuance endpoint that deploys a `CarbonCreditToken` per verified project
+- A purchase endpoint that sells credits to a buyer (held in platform custody on their behalf)
+- A retirement endpoint that burns credits and records an immutable `RetirementRecord`
+- A public retirement registry page, backed by both direct on-chain reads and `IndexerClient` for real-time updates
+
+```
+Project developer                 Your backend                  Stellar / Soroban
+       │                                │                              │
+       │── POST /api/projects ────────▶│── deployCarbonCredit() ──────▶│ token deployed
+       │                                │── registry.mint(treasury) ──▶│ credits minted to platform custody
+       │                                │                              │
+Corporate buyer                         │                              │
+       │── POST /api/purchase ────────▶│  record buyer's internal balance (your DB)
+       │── POST /api/retire ──────────▶│── registry.retire() ─────────▶│ credits burned, RetirementRecord written
+       │                                │                              │
+Public visitor                          │                              │
+       │── GET /api/registry ─────────▶│── registry.getRetirement() ──▶│ (per-token history)
+       │  (real-time) ──────────────────│── indexer.registerWebhook() ─▶│ (cross-token, live)
+```
+
+## Prerequisites
+
+- Node.js 18+
+- A Stellar testnet account and secret key (`S...`), funded via the [Stellar Friendbot](https://friendbot.stellar.org)
+- A running `@ankarachain/indexer` instance (for the real-time registry step) — see [IndexerClient](/sdk/indexer-client)
+- `npm install @ankarachain/sdk express`
+
+---
+
+<Steps>
+  <Step title="Scaffold the project">
+    ```
+    carbon-marketplace/
+    ├── src/
+    │   ├── config.ts
+    │   ├── routes.ts             # issuance, purchase, retirement, registry
+    │   └── server.ts
+    ├── ankara.config.json
+    ├── .env
+    └── package.json
+    ```
+
+    ```typescript src/config.ts
+    import { TokenFactory, IndexerClient } from "@ankarachain/sdk";
+
+    export const factory = new TokenFactory({
+      network:          "stellar-testnet",
+      stellarSecretKey: process.env.STELLAR_SECRET_KEY!,   // the platform's own custody signer
+      factoryAddress:   "CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF",
+    });
+
+    export const indexer = new IndexerClient(process.env.INDEXER_URL!); // e.g. "https://indexer.myapp.com"
+    ```
+  </Step>
+
+  <Step title="Issue credits for a verified project">
+    ```typescript src/routes.ts
+    import express from "express";
+    import { AssetRegistry } from "@ankarachain/sdk";
+    import { factory } from "./config";
+
+    export const router = express.Router();
+    const TREASURY_ADDRESS = process.env.TREASURY_ADDRESS!; // the platform's own custody address
+
+    router.post("/api/projects", async (req, res) => {
+      const { creditType, verificationBodyRef, vintageYear, quantityCO2e, projectLocation, projectType } = req.body;
+
+      const now = BigInt(Math.floor(Date.now() / 1000));
+
+      const result = await factory.deployCarbonCredit({
+        name:        `${projectLocation} ${creditType} Credits`,
+        symbol:      "CARB",
+        assetId:     `${verificationBodyRef}-${vintageYear}`,
+        countryCode: req.body.countryCode,
+        metadata: {
+          creditType,
+          verificationBodyRef,
+          vintageYear:         BigInt(vintageYear),
+          quantityCO2e:        BigInt(quantityCO2e) * 10n ** 18n, // 1e18 = 1 tCO2e
+          projectLocation,
+          projectType,
+          verificationDocHash: "0x" + "00".repeat(32),
+          lastUpdated:         now,
+        },
+      });
+
+      // Mint the full verified quantity into the platform's own custody treasury —
+      // buyers hold an internal balance in your DB rather than an on-chain wallet of their own.
+      const registry = new AssetRegistry(factory.adapter, result.tokenAddress, "carbon-credit");
+      await registry.mint(TREASURY_ADDRESS, BigInt(quantityCO2e) * 10n ** 18n);
+
+      res.json({ tokenAddress: result.tokenAddress, txHash: result.txHash });
+    });
+    ```
+
+    <Note>
+      This custodial model keeps the tutorial simple — buyers never need their own Stellar wallet. If you'd rather issue credits directly to each buyer's own address, mint to `buyerAddress` instead of `TREASURY_ADDRESS`; retirement (next step) then has to be signed by the buyer's own wallet via `stellarSigner`, since `retire()` always burns the caller's own balance.
+    </Note>
+  </Step>
+
+  <Step title="Sell and retire credits">
+    A purchase just moves the buyer's internal ledger balance in your database — the credits stay in platform custody on-chain until retirement:
+
+    ```typescript src/routes.ts (continued)
+    router.post("/api/purchase", async (req, res) => {
+      const { buyerId, tokenAddress, amountCO2e } = req.body;
+      await creditBuyerLedger(buyerId, tokenAddress, amountCO2e); // your DB — no on-chain call needed yet
+      res.sendStatus(200);
+    });
+
+    router.post("/api/retire", async (req, res) => {
+      const { buyerId, buyerName, tokenAddress, amountCO2e, note } = req.body;
+
+      await debitBuyerLedger(buyerId, tokenAddress, amountCO2e); // your DB — fails if buyer's ledger balance is short
+
+      const registry = new AssetRegistry(factory.adapter, tokenAddress, "carbon-credit");
+      const txHash = await registry.retire(
+        BigInt(amountCO2e) * 10n ** 18n,
+        buyerName,   // beneficiary — a free-text label, not an address
+        note         // e.g. "Scope 1 offset — Lagos office, 2025"
+      );
+
+      res.json({ txHash });
+    });
+    ```
+
+    <Note>
+      `retire()` is callable by **any token holder** — it's not admin-gated — and it burns `amount` from the caller's own balance. Because the platform's custody signer is calling it here, the platform must actually hold at least `amountCO2e` of that token on-chain; the ledger debit above is what prevents a buyer from retiring more than they've purchased.
+    </Note>
+  </Step>
+
+  <Step title="Serve a per-project retirement history">
+    Every retirement is stored on-chain as a `RetirementRecord` you can read back directly — no indexer required for this per-token view:
+
+    ```typescript src/routes.ts (continued)
+    router.get("/api/registry/:tokenAddress", async (req, res) => {
+      const registry = new AssetRegistry(factory.adapter, req.params.tokenAddress, "carbon-credit");
+
+      const total  = await registry.getTotalRetired();
+      const count  = await registry.getTotalRetirements();
+      const records = [];
+      for (let i = 0; i < count; i++) {
+        records.push(await registry.getRetirement(i));
+      }
+
+      res.json({ totalRetired: total.toString(), records });
+    });
+    ```
+  </Step>
+
+  <Step title="Add a live, cross-project registry with IndexerClient">
+    For a public homepage widget showing retirements *across every project* in real time, register a webhook instead of polling each token individually:
+
+    ```typescript src/routes.ts (continued)
+    router.post("/api/admin/watch-retirements", async (req, res) => {
+      const webhook = await indexer.registerWebhook(
+        "https://yourplatform.com/api/hooks/retirements",
+        ["*"] // subscribe to all event types; filter by payload shape in your handler below
+      );
+
+      await saveWebhookSecret(webhook.id, webhook.secret!); // shown only once — store it now
+      res.json({ webhookId: webhook.id });
+    });
+
+    router.post("/api/hooks/retirements", express.raw({ type: "*/*" }), async (req, res) => {
+      // Verify req.headers["x-ankara-signature"] against your stored secret first —
+      // see the signature verification example in the IndexerClient reference.
+      const event = JSON.parse(req.body.toString());
+
+      if (event.data && "beneficiary" in event.data) {
+        await broadcastToRegistryFeed(event); // push to your public live feed (WebSocket, SSE, etc.)
+      }
+
+      res.sendStatus(200);
+    });
+    ```
+
+    <Note>
+      The exact normalized `eventType` string your indexer assigns to a retirement is a property of your indexer's own event configuration — subscribing to `["*"]` and checking the event's `data` shape (as above) keeps this handler correct regardless of that naming. See [IndexerClient](/sdk/indexer-client) for signature verification and the full webhook payload shape.
+    </Note>
+  </Step>
+</Steps>
+
+---
+
+## Going further
+
+- **Non-custodial retirement**: let corporate buyers connect their own Stellar wallet (Freighter) and call `retire()` directly with `stellarSigner`, so the platform never has to hold credits on their behalf — see [React Hooks: Using Stellar in the browser](/guides/react-hooks#using-stellar-in-the-browser).
+- **Selling credits with fiat**: reuse the `RampManager` on-ramp flow from the [Farmland Investment Platform tutorial](/tutorials/farmland-investment-platform) to accept card or bank payment for credits before minting/crediting the buyer's ledger.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="AssetRegistry" icon="database" href="/sdk/asset-registry">
+    Full reference for `retire`, `getRetirement`, `getTotalRetired`, `getTotalRetirements`.
+  </Card>
+  <Card title="IndexerClient" icon="database" href="/sdk/indexer-client">
+    Event queries, webhook registration, and signature verification in full.
+  </Card>
+  <Card title="Asset Templates" icon="layer-group" href="/concepts/asset-templates">
+    The full `CarbonCreditMetadata` schema and `RetirementRecord` shape.
+  </Card>
+  <Card title="TokenFactory" icon="factory" href="/sdk/token-factory">
+    Full reference for `deployCarbonCredit`.
+  </Card>
+</CardGroup>

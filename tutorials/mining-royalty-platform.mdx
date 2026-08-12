@@ -1,0 +1,237 @@
+---
+title: "Build a Mining Royalty Investment and Lending Platform"
+sidebarTitle: "Mining Royalty Platform"
+description: "Build the bare bones of a mining royalty product on Stellar: deploy a MiningRightsToken, declare royalty payouts, track licence expiry, and let holders borrow stablecoin against their tokens with CollateralVault."
+---
+
+A licensed gold concession in Ashanti generates royalty income for whoever holds a stake in it — but that stake is illiquid until the licence runs out. This tutorial builds a `MiningRightsToken` platform where holders can also **borrow stablecoin against their royalty tokens** without selling them, using `CollateralVault`. That lending primitive is Stellar/Soroban-only in the SDK's current version, so this whole tutorial stays on Stellar rather than switching networks partway through.
+
+## What you'll build
+
+- An admin script that deploys one `MiningRightsToken` per concession licence
+- A royalty declaration job and a licence-expiry sweep
+- A borrowing flow: a holder locks royalty tokens as collateral and draws a stablecoin loan via `CollateralVault`
+- A React panel showing a holder's token balance alongside their open loan's live loan-to-value ratio
+
+```
+Licence admin                     Your backend                  Stellar / Soroban
+      │                                 │                              │
+      │── POST /api/concessions ───────▶│── deployMiningRights() ─────▶│ token deployed
+      │                                 │                              │
+      │  (quarterly) ───────────────────│── declareRoyalty() ─────────▶│ on-chain declaration
+      │  (nightly cron) ────────────────│── isLicenseExpired() ───────▶│
+      │                                 │── markLicenseExpired() ─────▶│ status → EXPIRED
+      │                                                                │
+Holder                                                                 │
+      │── POST /api/loans/open ────────▶│── vault.openLoan() ─────────▶│ collateral locked, stablecoin borrowed
+      │── GET /api/loans/:id ───────────▶│── vault.currentLtvBps() ────▶│ live LTV check
+      │── POST /api/loans/:id/repay ────▶│── vault.repayLoan() ────────▶│ collateral released
+```
+
+## Prerequisites
+
+- Node.js 18+
+- A Stellar testnet account and secret key (`S...`), funded via the [Stellar Friendbot](https://friendbot.stellar.org)
+- `npm install @ankarachain/sdk express node-cron`
+
+<Note>
+  `CollateralVault` is a **singleton per network** — you don't deploy it yourself, and it isn't available on EVM in the current SDK version. The testnet vault address below is the shared Ankara Chain Stellar Testnet deployment. See [CollateralVault](/sdk/collateral-vault).
+</Note>
+
+---
+
+<Steps>
+  <Step title="Scaffold the project">
+    ```
+    mining-royalty-platform/
+    ├── src/
+    │   ├── config.ts
+    │   ├── routes.ts             # concessions, royalty, loans
+    │   ├── jobs/
+    │   │   └── expireLicenses.ts
+    │   └── server.ts
+    ├── ankara.config.json
+    ├── .env
+    └── package.json
+    ```
+
+    ```typescript src/config.ts
+    import { TokenFactory, CollateralVault } from "@ankarachain/sdk";
+
+    export const factory = new TokenFactory({
+      network:          "stellar-testnet",
+      stellarSecretKey: process.env.STELLAR_SECRET_KEY!,
+      factoryAddress:   "CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF",
+    });
+
+    // Shared Ankara Chain Stellar Testnet CollateralVault
+    export const vault = new CollateralVault(
+      factory.adapter,
+      "CDIUS3CGVFJONWUK3SCK4RFFONENSJ6QRZLNOHHO7EMVPZCCQ3IUSVNB"
+    );
+    ```
+  </Step>
+
+  <Step title="Deploy a token per concession">
+    ```typescript src/routes.ts
+    import express from "express";
+    import { AssetRegistry } from "@ankarachain/sdk";
+    import { factory } from "./config";
+
+    export const router = express.Router();
+
+    router.post("/api/concessions", async (req, res) => {
+      const { licenseNumber, mineralType, concessionArea, areaHectares, licenseDurationDays, issuingAuthority, royaltyRateBps } = req.body;
+
+      const now = BigInt(Math.floor(Date.now() / 1000));
+
+      const result = await factory.deployMiningRights({
+        name:        `${concessionArea} ${mineralType} Rights`,
+        symbol:      "MINE",
+        assetId:     licenseNumber,
+        countryCode: req.body.countryCode,
+        metadata: {
+          licenseNumber,
+          mineralType,
+          concessionArea,
+          areaHectares:        BigInt(areaHectares),
+          licenseExpiry:       now + BigInt(licenseDurationDays * 24 * 60 * 60),
+          issuingAuthority,
+          licenseDocumentHash: "0x" + "00".repeat(32),
+          royaltyRateBps:      BigInt(royaltyRateBps),   // e.g. 300n = 3%
+          lastUpdated:         now,
+        },
+      });
+
+      res.json({ tokenAddress: result.tokenAddress, txHash: result.txHash });
+    });
+    ```
+  </Step>
+
+  <Step title="Declare royalties and track licence expiry">
+    `declareRoyalty()` only records an on-chain declaration of the royalty owed for a given extraction value — it doesn't move funds. Pay holders off-chain first (proportional to their share of `getTotalSupply()`, the same pattern used in the [Real Estate Income Platform tutorial](/tutorials/real-estate-income-platform)'s rental distribution step), then declare:
+
+    ```typescript src/routes.ts (continued)
+    router.post("/api/concessions/:tokenAddress/royalty", async (req, res) => {
+      const registry = new AssetRegistry(factory.adapter, req.params.tokenAddress, "mining-rights");
+      // Off-chain: pay each holder their share of the royalty first (see the Real Estate tutorial's pattern).
+      const txHash = await registry.declareRoyalty(BigInt(req.body.extractionValueUSD) * 10n ** 18n);
+      res.json({ txHash });
+    });
+    ```
+
+    ```typescript src/jobs/expireLicenses.ts
+    import cron from "node-cron";
+    import { AssetRegistry } from "@ankarachain/sdk";
+    import { factory } from "../config";
+
+    cron.schedule("0 3 * * *", async () => {
+      for (const tokenAddress of await listActiveConcessionAddresses()) { // your DB query
+        const registry = new AssetRegistry(factory.adapter, tokenAddress, "mining-rights");
+
+        if (await registry.isLicenseExpired()) {
+          const txHash = await registry.markLicenseExpired();
+          console.log(`Licence expired for ${tokenAddress}: ${txHash}`);
+        }
+      }
+    });
+    ```
+
+    A licence holder who renews can extend expiry directly: `await registry.renewLicense(newExpiryUnixSeconds)`.
+  </Step>
+
+  <Step title="Let holders borrow against their tokens">
+    A holder locks some of their `MiningRightsToken` balance as collateral and borrows the vault's configured stablecoin, up to its loan-to-value limit:
+
+    ```typescript src/routes.ts (continued)
+    router.post("/api/loans/open", async (req, res) => {
+      const { holderSigner, collateralTokenAddress, collateralAmount, borrowAmount } = req.body;
+
+      // In a non-custodial product this call is signed by the holder's own wallet
+      // (a TokenFactory/CollateralVault built with the holder's stellarSigner), not the platform's.
+      const holderVault = req.holderVault; // constructed per-request from holderSigner — see the note below
+
+      const { loanId, txHash } = await holderVault.openLoan(
+        collateralTokenAddress,
+        BigInt(collateralAmount) * 10_000_000n,  // Stellar tokens use 7 decimals
+        BigInt(borrowAmount) * 10_000_000n
+      );
+
+      res.json({ loanId, txHash });
+    });
+
+    router.get("/api/loans/:loanId", async (req, res) => {
+      const { vault } = await import("./config");
+      const loanId = Number(req.params.loanId);
+
+      const loan       = await vault.getLoan(loanId);
+      const currentLtv = await vault.currentLtvBps(loanId);
+      const liquidatable = await vault.isLiquidatable(loanId);
+
+      res.json({ loan, currentLtvBps: currentLtv, liquidatable });
+    });
+
+    router.post("/api/loans/:loanId/repay", async (req, res) => {
+      const { vault } = await import("./config");
+      const txHash = await vault.repayLoan(Number(req.params.loanId));
+      res.json({ txHash });
+    });
+    ```
+
+    <Warning>
+      `openLoan`, `repayLoan`, and `liquidate` must be signed by the actual borrower — `CollateralVault` tracks loans per `msg.sender`/invoker. Build a `CollateralVault` instance from the holder's own signer (`stellarSigner` in the browser, or a per-holder `stellarSecretKey` server-side) rather than the platform's admin key. See [CollateralVault](/sdk/collateral-vault) for the full borrower/admin method split.
+    </Warning>
+  </Step>
+
+  <Step title="Show the position to holders">
+    ```tsx src/components/RoyaltyPosition.tsx
+    "use client";
+
+    import { useAsset, useTokenBalance } from "@ankarachain/sdk/react";
+
+    export function RoyaltyPosition({ tokenAddress, walletAddress }: { tokenAddress: string; walletAddress: string }) {
+      const asset   = useAsset({ tokenAddress, template: "mining-rights", network: "stellar-testnet" });
+      const balance = useTokenBalance({ tokenAddress, walletAddress, network: "stellar-testnet" });
+
+      if (asset.isLoading) return <p>Loading…</p>;
+
+      const meta = asset.metadata as { mineralType?: string; royaltyRateBps?: bigint; licenseExpiry?: bigint } | null;
+
+      return (
+        <div className="royalty-card">
+          <h3>{asset.name}</h3>
+          <p>Mineral: {meta?.mineralType ?? "—"}</p>
+          <p>Royalty rate: {meta?.royaltyRateBps != null ? Number(meta.royaltyRateBps) / 100 : "—"}%</p>
+          <p>Your shares: {balance.formatted ?? "0"}</p>
+        </div>
+      );
+    }
+    ```
+
+    Pair this with a call to `GET /api/loans/:loanId` to show any open loan's live LTV alongside the position — see [CollateralVault: Read Methods](/sdk/collateral-vault#read-methods) for `getBorrowerLoans()` to list all of a holder's loan IDs.
+  </Step>
+</Steps>
+
+---
+
+## Going further
+
+- **Liquidation bots**: anyone can call `vault.liquidate(loanId)` once `isLiquidatable()` returns `true` — a simple cron job that scans open loans and calls it is enough to bootstrap liquidation coverage before third-party keepers appear.
+- **EVM parity**: `deployMiningRights()` itself works identically on EVM — only the `CollateralVault` borrowing step in this tutorial is Stellar-specific for now.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="CollateralVault" icon="landmark" href="/sdk/collateral-vault">
+    Full reference for `openLoan`, `repayLoan`, `liquidate`, and every read method.
+  </Card>
+  <Card title="AssetRegistry" icon="database" href="/sdk/asset-registry">
+    Full reference for `declareRoyalty`, `isLicenseExpired`, `renewLicense`.
+  </Card>
+  <Card title="Asset Templates" icon="layer-group" href="/concepts/asset-templates">
+    The full `MiningRightsMetadata` schema.
+  </Card>
+  <Card title="Networks" icon="globe" href="/concepts/networks">
+    Which primitives are Stellar-only vs. available on both chains.
+  </Card>
+</CardGroup>

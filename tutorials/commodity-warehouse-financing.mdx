@@ -1,0 +1,220 @@
+---
+title: "Build a Warehouse Receipt Financing Platform"
+sidebarTitle: "Warehouse Receipt Financing"
+description: "Build the bare bones of a warehouse receipt financing product: issue a CommodityReceiptToken on deposit, pay the farmer out in fiat with RampManager, and track expiry automatically."
+---
+
+A farmer deposits cocoa or maize into a certified warehouse instead of selling it cheap at harvest, gets a `CommodityReceiptToken` representing the stored quantity, and cashes part of its value out to mobile money the same day — instead of waiting for a buyer. This tutorial builds that flow: deposit → receipt token → fiat payout, plus the expiry tracking a warehouse operator needs as receipts approach their storage limit.
+
+## What you'll build
+
+- A deposit endpoint that mints a `CommodityReceiptToken` for a batch as soon as the warehouse operator confirms intake
+- An off-ramp endpoint that lets the farmer convert receipt value to mobile money or bank payout via `RampManager`
+- A scheduled job that marks receipts `EXPIRED` once their `expiryDate` passes
+
+```
+Warehouse operator                Your backend                  Stellar / Soroban
+       │                               │                              │
+       │── POST /api/deposits ────────▶│── deployCommodity() ────────▶│ receipt token deployed
+       │                               │── registry.mint(farmer) ────▶│ receipt shares minted
+       │                               │                              │
+Farmer │                               │                              │
+       │── POST /api/cash-out ────────▶│── ramp.initiateOffRamp() ───▶│ (off-chain provider)
+       │◀──────── payout initiated ────│── ramp.depositOffRamp() ────▶│ tokens custodied
+       │                               │                              │
+       │   (nightly cron) ─────────────│── registry.isExpired() ─────▶│
+       │                               │── registry.markExpired() ───▶│ status → EXPIRED
+```
+
+## Prerequisites
+
+- Node.js 18+
+- A Stellar testnet account and secret key (`S...`), funded via the [Stellar Friendbot](https://friendbot.stellar.org)
+- `npm install @ankarachain/sdk express node-cron`
+
+---
+
+<Steps>
+  <Step title="Scaffold the project">
+    ```
+    warehouse-platform/
+    ├── src/
+    │   ├── config.ts        # TokenFactory / RampManager setup
+    │   ├── routes.ts         # deposit, cash-out endpoints
+    │   ├── jobs/
+    │   │   └── expireBatches.ts   # nightly expiry sweep
+    │   └── server.ts
+    ├── ankara.config.json
+    ├── .env
+    └── package.json
+    ```
+
+    ```typescript src/config.ts
+    import { TokenFactory, RampManager, ManualRampProvider } from "@ankarachain/sdk";
+
+    export const factory = new TokenFactory({
+      network:          "stellar-testnet",
+      stellarSecretKey: process.env.STELLAR_SECRET_KEY!,
+      factoryAddress:   "CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF",
+    });
+
+    export const ramp = new RampManager(
+      new ManualRampProvider({ exchangeRates: { NGN: 1 / 1580, GHS: 1 / 16 }, feeBps: 150 }),
+      factory.adapter,
+      { settlementAddress: process.env.RAMP_SETTLEMENT_ADDRESS! }
+    );
+    ```
+
+    <Note>
+      `RampManager` here is constructed with `factory.adapter` and a `settlementAddress` because this tutorial's off-ramp step needs the on-chain custody half (`depositOffRamp`) as well as the off-chain quote/session half. Deploy the settlement contract once per platform with `factory.deployRampSettlement({ treasury })` — see [Fiat Ramp: On-chain settlement](/guides/ramp#on-chain-settlement-optional).
+    </Note>
+  </Step>
+
+  <Step title="Issue a receipt token on deposit">
+    Run this each time the warehouse operator confirms a new batch has arrived. The same call works on EVM by swapping the `TokenFactory` config — see [Deploy a Token](/guides/deploy-token) for the EVM variant.
+
+    ```typescript src/routes.ts
+    import express from "express";
+    import { AssetRegistry } from "@ankarachain/sdk";
+    import { factory, ramp } from "./config";
+
+    export const router = express.Router();
+
+    router.post("/api/deposits", async (req, res) => {
+      const { farmerAddress, commodityType, quantityKg, warehouseId, gradeClassification, valuationUSD } = req.body;
+
+      const now       = BigInt(Math.floor(Date.now() / 1000));
+      const sixMonths = BigInt(60 * 60 * 24 * 180);
+
+      const result = await factory.deployCommodity({
+        name:        `${commodityType} Receipt — ${warehouseId}`,
+        symbol:      "WHR",
+        assetId:     `${warehouseId}-${Date.now()}`,
+        countryCode: "GH",
+        metadata: {
+          commodityType,
+          quantityKg:           BigInt(quantityKg),
+          gradeClassification,
+          warehouseId,
+          warehouseLocation:    "Tema Port, Ghana",
+          depositDate:          now,
+          expiryDate:           now + sixMonths,
+          inspectionReportHash: "0x" + "00".repeat(32),
+          valuationUSD:         BigInt(valuationUSD) * 10n ** 18n,
+          harvestSeason:        "2025A",
+          lastUpdated:          now,
+        },
+      });
+
+      const registry = new AssetRegistry(factory.adapter, result.tokenAddress, "commodity");
+      await registry.mint(farmerAddress, BigInt(quantityKg) * 10n ** 18n); // 1 token = 1 kg stored
+
+      // Persist { tokenAddress: result.tokenAddress, farmerAddress, warehouseId } to your DB here.
+
+      res.json({ tokenAddress: result.tokenAddress, txHash: result.txHash });
+    });
+    ```
+  </Step>
+
+  <Step title="Let the farmer cash out to fiat">
+    The farmer picks how many kilograms' worth of receipt to convert. Quote, initiate the off-ramp session, then deposit the tokens into the settlement contract for custody:
+
+    ```typescript src/routes.ts (continued)
+    router.post("/api/cash-out", async (req, res) => {
+      const { tokenAmount, fiatCurrency, countryCode, payoutAccount } = req.body;
+
+      const session = await ramp.initiateOffRamp({
+        tokenAmount,
+        tokenSymbol:  "WHR",
+        fiatCurrency,
+        countryCode,
+        payoutAccount, // { type: "mobile-money", accountNumber, provider: "MTN" } or { type: "bank", ... }
+      });
+
+      // On Stellar the token transfer authorization happens inside depositOffRamp itself —
+      // no separate approval step, unlike the EVM path (see the Fiat Ramp guide).
+      const txHash = await ramp.depositOffRamp(
+        session.sessionId,
+        req.body.receiptTokenAddress,
+        BigInt(tokenAmount) * 10n ** 18n
+      );
+
+      res.json({ sessionId: session.sessionId, txHash });
+    });
+    ```
+
+    Once your provider confirms the payout (via webhook or by polling `ramp.getStatus()`), release the custodied tokens to the treasury:
+
+    ```typescript src/routes.ts (continued)
+    import { RampSessionStatus } from "@ankarachain/sdk";
+
+    router.post("/api/webhooks/payout-settled", async (req, res) => {
+      const { sessionId } = req.body;
+
+      const status = await ramp.getStatus(sessionId);
+      if (status === RampSessionStatus.SETTLED) {
+        await ramp.confirmOffRampSettlement(sessionId);
+      } else if (status === RampSessionStatus.FAILED) {
+        await ramp.refundOffRamp(sessionId);
+      }
+
+      res.sendStatus(200);
+    });
+    ```
+  </Step>
+
+  <Step title="Sweep expired batches nightly">
+    Commodity receipts carry a hard `expiryDate` — past it, the warehouse can no longer honor the stored quantity. Mark expired batches so your UI and any downstream lender can see the status change immediately:
+
+    ```typescript src/jobs/expireBatches.ts
+    import cron from "node-cron";
+    import { AssetRegistry } from "@ankarachain/sdk";
+    import { factory } from "../config";
+
+    async function sweepExpiredReceipts(tokenAddresses: string[]) {
+      for (const tokenAddress of tokenAddresses) {
+        const registry = new AssetRegistry(factory.adapter, tokenAddress, "commodity");
+
+        if (await registry.isExpired()) {
+          const txHash = await registry.markExpired();
+          console.log(`Marked ${tokenAddress} expired: ${txHash}`);
+        }
+      }
+    }
+
+    // Run once a day at 02:00
+    cron.schedule("0 2 * * *", async () => {
+      const active = await listActiveReceiptAddresses(); // your DB query
+      await sweepExpiredReceipts(active);
+    });
+    ```
+
+    <Note>
+      `isExpired()` and `markExpired()` are only available on tokens deployed with the `"commodity"` template — calling them on any other `AssetRegistry` template throws. See [AssetRegistry: Commodity Methods](/sdk/asset-registry#commodity-methods).
+    </Note>
+  </Step>
+</Steps>
+
+---
+
+## Going further
+
+- **Batch warehouses**: if one warehouse holds many rotating lots, `deployCommodityBatchToken()` (ERC-1155-style) may fit better than one `CommodityReceiptToken` per batch — see [Asset Templates: Multi-Token Variants](/concepts/asset-templates#multi-token-variants).
+- **Lending against a receipt** instead of an outright off-ramp cash-out: see the [Mining Royalty Platform tutorial](/tutorials/mining-royalty-platform), which walks through `CollateralVault` — the same borrow-against-token pattern applies to warehouse receipts.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="AssetRegistry" icon="database" href="/sdk/asset-registry">
+    Full reference for `isExpired`, `markExpired`, and every other registry method.
+  </Card>
+  <Card title="RampManager" icon="arrow-left-right" href="/sdk/ramp-manager">
+    On-chain settlement, `depositOffRamp`, `confirmOffRampSettlement`, `refundOffRamp`.
+  </Card>
+  <Card title="Asset Templates" icon="layer-group" href="/concepts/asset-templates">
+    The full `CommodityMetadata` schema and lifecycle.
+  </Card>
+  <Card title="CLI Commands" icon="terminal" href="/cli/commands">
+    `ankara deploy-batch`, `ankara offramp-initiate`, and related commands.
+  </Card>
+</CardGroup>

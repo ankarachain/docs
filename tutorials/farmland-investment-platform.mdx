@@ -1,0 +1,284 @@
+---
+title: "Build a Fractional Farmland Investment Platform"
+sidebarTitle: "Farmland Investment Platform"
+description: "Build the bare bones of a fractional farmland investment product: deploy a FarmlandToken, take fiat deposits with RampManager, and show investors their position with the React hooks."
+---
+
+Farmland investment platforms let a diaspora investor in London or a saver in Nairobi buy a fractional stake in a real parcel of farmland back home, in the local currency they already have — not crypto. This tutorial builds the bare bones of that product: a `FarmlandToken` deployed per parcel, a small backend that turns an NGN or KES deposit into minted shares via `RampManager`, and a React page investors use to check their position.
+
+## What you'll build
+
+- An admin script that deploys one `FarmlandToken` per parcel with real metadata (location, valuation, soil type, title document hash)
+- An Express API with three routes: get an on-ramp quote, start an investment (fiat → shares), and a webhook that mints shares once the deposit settles
+- A React investor dashboard using `useAsset` and `useTokenBalance`
+
+```
+Investor (browser)                 Your backend                    Stellar / Soroban
+      │                                  │                                │
+      │── GET /api/quote ───────────────▶│── ramp.getQuote() ────────────▶│ (off-chain provider)
+      │◀───────────────── quote ─────────│                                │
+      │                                  │                                │
+      │── POST /api/invest ─────────────▶│── ramp.initiateOnRamp() ──────▶│ (off-chain provider)
+      │◀──────────── paymentUrl ─────────│                                │
+      │                                  │                                │
+      │  (investor pays NGN/KES) ───────▶│  provider webhook fires        │
+      │                                  │── registry.mint(investor) ────▶│ shares minted
+      │                                  │                                │
+      │── useAsset / useTokenBalance ────┼───────────────────────────────▶│ (read-only, no signer)
+```
+
+## Prerequisites
+
+- Node.js 18+
+- A Stellar testnet account and secret key (`S...`) — fund it with the [Stellar Friendbot](https://friendbot.stellar.org)
+- `npm install @ankarachain/sdk express` (add `ethers` too if you also want the EVM path shown below)
+
+<Warning>
+  Keep `STELLAR_SECRET_KEY` in `.env`, never in application code or version control. The mint step below runs server-side with the platform's own admin key — investors never handle a private key.
+</Warning>
+
+---
+
+<Steps>
+  <Step title="Scaffold the project">
+    ```
+    farmland-platform/
+    ├── src/
+    │   ├── config.ts       # shared TokenFactory / RampManager setup
+    │   ├── deploy.ts        # one-off script: deploy a FarmlandToken per parcel
+    │   ├── routes.ts        # Express routes: quote, invest, webhook, status
+    │   └── server.ts        # Express app entry point
+    ├── ankara.config.json
+    ├── .env
+    └── package.json
+    ```
+
+    `src/config.ts` builds the two SDK clients every route needs — a `TokenFactory` for the platform's admin signer, and a `RampManager` wired to a fiat provider:
+
+    ```typescript src/config.ts
+    import { TokenFactory, RampManager, ManualRampProvider } from "@ankarachain/sdk";
+
+    export const factory = new TokenFactory({
+      network:          "stellar-testnet",
+      stellarSecretKey: process.env.STELLAR_SECRET_KEY!,
+      factoryAddress:   "CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF",
+    });
+
+    // Swap ManualRampProvider for StellarAnchorProvider (or createRampProvider({ provider: "moonpay", ... })
+    // from "@ankarachain/sdk/server") once you're ready to take real fiat payments.
+    export const ramp = new RampManager(
+      new ManualRampProvider({
+        exchangeRates: { NGN: 1 / 1580, KES: 1 / 152 },
+        feeBps: 150, // 1.5%
+      })
+    );
+    ```
+
+    <Note>
+      `ManualRampProvider` is the right default while you build — it needs no API keys and lets you drive sessions to `"settled"` yourself in tests. Swap in `RampManager.connectAnchor()` for a real Stellar anchor (Cowrie, MoneyGram) when you go live — see the [Fiat Ramp guide](/guides/ramp).
+    </Note>
+  </Step>
+
+  <Step title="Deploy a FarmlandToken per parcel">
+    Run this once per parcel you onboard. It's the same `TokenFactory.deployFarmland()` call whether you're on Stellar or EVM — only the config passed to `TokenFactory` changes.
+
+    <Tabs>
+      <Tab title="Stellar">
+        ```typescript src/deploy.ts
+        import { factory } from "./config";
+
+        const now = BigInt(Math.floor(Date.now() / 1000));
+
+        const result = await factory.deployFarmland({
+          name:        "Kano Farmland Token",
+          symbol:      "KFT",
+          assetId:     "KANO-FARM-001",
+          countryCode: "NG",
+          metadata: {
+            location:          "Kano State, Nigeria — Plot 14B, Dawanau",
+            areaSqMeters:      250_000n,
+            soilType:          "Sandy loam",
+            irrigationType:    "Drip",
+            cropHistory:       "Sesame (2022), Soybean (2023), Sorghum (2024)",
+            titleDocumentHash: "0x" + "ab".repeat(32),   // hash of the title deed
+            valuationUSD:      150_000n * 10n ** 18n,     // $150,000 in wei
+            stateRegion:       "Kano",
+            lastUpdated:       now,
+          },
+        });
+
+        console.log("FarmlandToken deployed:", result.tokenAddress); // "C..." Soroban contract ID
+        console.log("Tx hash:", result.txHash);
+        ```
+      </Tab>
+      <Tab title="EVM">
+        ```typescript src/deploy.ts
+        import { TokenFactory } from "@ankarachain/sdk";
+        import { ethers } from "ethers";
+
+        const provider = new ethers.JsonRpcProvider("https://rpc-amoy.polygon.technology");
+        const signer   = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+
+        const factory = new TokenFactory({ network: "polygon-amoy", signer });
+        const now     = BigInt(Math.floor(Date.now() / 1000));
+
+        const result = await factory.deployFarmland({
+          name: "Kano Farmland Token", symbol: "KFT",
+          assetId: "KANO-FARM-001", countryCode: "NG",
+          metadata: {
+            location: "Kano State, Nigeria — Plot 14B, Dawanau",
+            areaSqMeters: 250_000n, soilType: "Sandy loam", irrigationType: "Drip",
+            cropHistory: "Sesame (2022), Soybean (2023), Sorghum (2024)",
+            titleDocumentHash: ethers.ZeroHash,
+            valuationUSD: ethers.parseEther("150000"),
+            stateRegion: "Kano", lastUpdated: now,
+          },
+        });
+
+        console.log("FarmlandToken deployed:", result.tokenAddress); // "0x..." address
+        ```
+      </Tab>
+    </Tabs>
+
+    Save the resulting `tokenAddress` — your platform's database should map each parcel to its deployed token address and template (`"farmland"`).
+  </Step>
+
+  <Step title="Quote and initiate an investment">
+    An investor picks a parcel and an amount in their local currency. Get a quote, then start an on-ramp session:
+
+    ```typescript src/routes.ts
+    import express from "express";
+    import { AssetRegistry } from "@ankarachain/sdk";
+    import { factory, ramp } from "./config";
+
+    export const router = express.Router();
+
+    router.post("/api/quote", async (req, res) => {
+      const { fiatAmount, fiatCurrency, countryCode } = req.body;
+
+      const quote = await ramp.getQuote({
+        direction:    "on-ramp",
+        fiatCurrency,
+        tokenSymbol:  "mUSD",   // the share-denominated stablecoin your platform quotes in
+        countryCode,
+        fiatAmount,
+      });
+
+      res.json(quote);
+    });
+
+    router.post("/api/invest", async (req, res) => {
+      const { fiatAmount, fiatCurrency, countryCode, investorAddress, parcelId } = req.body;
+
+      const session = await ramp.initiateOnRamp({
+        fiatAmount,
+        fiatCurrency,
+        tokenSymbol:       "mUSD",
+        recipientAddress:  investorAddress,
+        countryCode,
+        customerReference: parcelId,   // tie the session back to the parcel in your webhook
+      });
+
+      // Persist { sessionId: session.sessionId, parcelId, investorAddress, fiatAmount } to your DB here.
+
+      res.json({ sessionId: session.sessionId, paymentUrl: session.paymentUrl });
+    });
+    ```
+  </Step>
+
+  <Step title="Mint shares once the deposit settles">
+    In production, your fiat provider calls a webhook when the payment clears. Verify the payload, then mint shares to the investor and record the transition to `ACTIVE`:
+
+    ```typescript src/routes.ts (continued)
+    import { AssetStatus } from "@ankarachain/sdk";
+
+    router.post("/api/webhooks/payment-settled", async (req, res) => {
+      const { sessionId, parcelId, investorAddress, shareAmount } = await lookupSession(req); // your DB lookup
+
+      const tokenAddress = await lookupTokenAddressForParcel(parcelId); // your DB lookup
+      const registry = new AssetRegistry(factory.adapter, tokenAddress, "farmland");
+
+      const status = await registry.getStatus();
+      if (status === AssetStatus.DRAFT) {
+        await registry.setStatus(AssetStatus.ACTIVE); // first sale activates the parcel
+      }
+
+      const txHash = await registry.mint(investorAddress, shareAmount); // amount in wei, 18-decimal
+      console.log(`Minted shares for session ${sessionId}: ${txHash}`);
+
+      res.sendStatus(200);
+    });
+    ```
+
+    <Tip>
+      The first `mint()` call on a token automatically transitions it from `DRAFT` to `ACTIVE` on-chain — the explicit `setStatus()` call above is only needed if your platform wants to flip a token to `ACTIVE` before the first sale (e.g. once KYC and legal review finish). See [Mint Tokens](/guides/mint-tokens) for the full lifecycle.
+    </Tip>
+  </Step>
+
+  <Step title="Show investors their position">
+    Read-only, no signer required — safe to run for any visitor:
+
+    ```tsx src/components/ParcelPosition.tsx
+    "use client";
+
+    import { useAsset, useTokenBalance } from "@ankarachain/sdk/react";
+    import { ethers } from "ethers";
+
+    export function ParcelPosition({
+      tokenAddress,
+      walletAddress,
+    }: {
+      tokenAddress:  string;
+      walletAddress: string;
+    }) {
+      const asset = useAsset({
+        tokenAddress,
+        template: "farmland",
+        network:  "stellar-testnet",
+      });
+      const balance = useTokenBalance({
+        tokenAddress,
+        walletAddress,
+        network: "stellar-testnet",
+      });
+
+      if (asset.isLoading || balance.isLoading) return <p>Loading…</p>;
+      if (asset.error)  return <p>Error: {asset.error.message}</p>;
+
+      return (
+        <div className="parcel-card">
+          <h3>{asset.name} ({asset.symbol})</h3>
+          <p>Valuation: ${asset.valuationUSD != null ? ethers.formatEther(asset.valuationUSD) : "—"}</p>
+          <p>Your shares: {balance.formatted ?? "0"}</p>
+          <p>Status: {asset.status !== null ? ["Draft", "Active", "Suspended", "Redeemed", "Expired"][asset.status] : "—"}</p>
+        </div>
+      );
+    }
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Going further
+
+- **Off-ramp**: let investors sell shares back to fiat with `ramp.initiateOffRamp()` — see the [Commodity Warehouse Financing tutorial](/tutorials/commodity-warehouse-financing) for the off-ramp side of this same flow.
+- **KYC gating**: attach a `WhitelistVerifier` so only verified investors can hold shares — see [Mint Tokens: Transfer management](/guides/mint-tokens#transfer-management-and-permissioned-transfers).
+- **Valuation updates**: as the parcel is revalued, call `registry.updateValuation(newValuationUSD)` — see [AssetRegistry](/sdk/asset-registry#farmland-real-estate-methods).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="TokenFactory" icon="factory" href="/sdk/token-factory">
+    Full reference for `deployFarmland` and every other deploy method.
+  </Card>
+  <Card title="RampManager" icon="arrow-left-right" href="/sdk/ramp-manager">
+    Quotes, sessions, providers, and on-chain settlement in depth.
+  </Card>
+  <Card title="AssetRegistry" icon="database" href="/sdk/asset-registry">
+    Reading and writing metadata on a deployed token.
+  </Card>
+  <Card title="React Hooks" icon="react" href="/guides/react-hooks">
+    `useAsset`, `useTokenBalance`, and `useAnkaraChain` in full.
+  </Card>
+</CardGroup>
