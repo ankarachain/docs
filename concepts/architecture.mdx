@@ -10,16 +10,14 @@ Ankara Chain sits between your application and the blockchain. You own the busin
 
 Every interaction in Ankara Chain flows through four layers, top to bottom:
 
-```
-┌─────────────────────────────────────────┐
-│  End Users & Investors                  │  ← Farmers, businesses, diaspora
-├─────────────────────────────────────────┤
-│  Your Application                       │  ← Business logic, UX, compliance decisions
-├─────────────────────────────────────────┤
-│  Ankara Chain SDK          ← You are here│  ← Smart contracts, CLI, TypeScript API
-├─────────────────────────────────────────┤
-│  Blockchain Protocol                    │  ← Ethereum · Polygon · Stellar · Celo · BNB
-└─────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Users["End Users &amp; Investors<br/><sub>Farmers, businesses, diaspora</sub>"]
+    App["Your Application<br/><sub>Business logic, UX, compliance decisions</sub>"]
+    SDK["Ankara Chain SDK — you are here<br/><sub>Smart contracts, CLI, TypeScript API</sub>"]
+    Chain["Blockchain Protocol<br/><sub>Ethereum · Polygon · Stellar · Celo · BNB</sub>"]
+
+    Users --> App --> SDK --> Chain
 ```
 
 Your code interacts only with the SDK layer. The SDK translates your calls into chain-specific transactions, deploys the right contracts, and surfaces typed results back to you — without exposing raw ABI calls or protocol-specific signing flows.

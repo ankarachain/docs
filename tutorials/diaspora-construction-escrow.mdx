@@ -13,18 +13,32 @@ Someone working abroad wants to fund a house being built for family back home, b
 - A contractor-facing flow to mark milestones delivered and claim a timelock release if the buyer goes unresponsive
 - A shared progress dashboard using `getAllMilestones()` and `getActivity()`
 
-```
-Diaspora buyer (payer)            Your backend                 Contractor (payee)
-       │                                │                              │
-       │                                │── deployEscrow() ───────────▶│ escrow deployed (arbiter set)
-       │                                │                              │
-       │── fund(0) ────────────────────▶│                              │ (buyer's own signer)
-       │                                │◀───── markDelivered(0) ──────│ (contractor's own signer)
-       │── approveMilestone(0) ────────▶│                              │ funds released
-       │                                │                              │
-       │  (disagreement) ── raiseDispute(0) ──▶ arbiter.resolveDispute(0, releaseToPayee)
-       │                                │                              │
-       │  (buyer unresponsive) ─────────┼──────── claimTimelockRelease(0) ◀── (after timelock elapses)
+```mermaid
+sequenceDiagram
+    participant Buyer as Diaspora buyer (payer)
+    participant Backend as Your backend
+    participant Contractor as Contractor (payee)
+    participant Arbiter
+
+    Note over Backend: deployEscrow()
+    Backend->>Contractor: escrow deployed (arbiter set)
+
+    Buyer->>Backend: fund(0)
+    Note left of Buyer: buyer's own signer
+    Contractor->>Backend: markDelivered(0)
+    Note right of Contractor: contractor's own signer
+    Buyer->>Backend: approveMilestone(0)
+    Backend->>Contractor: funds released
+
+    opt Disagreement
+        Buyer->>Backend: raiseDispute(0)
+        Arbiter->>Backend: resolveDispute(0, releaseToPayee)
+    end
+
+    opt Buyer unresponsive
+        Contractor->>Backend: claimTimelockRelease(0)
+        Note right of Contractor: after timelock elapses
+    end
 ```
 
 ## Prerequisites

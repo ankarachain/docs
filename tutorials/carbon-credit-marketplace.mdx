@@ -13,19 +13,34 @@ A reforestation project in the Congo Basin generates verified carbon offsets. A 
 - A retirement endpoint that burns credits and records an immutable `RetirementRecord`
 - A public retirement registry page, backed by both direct on-chain reads and `IndexerClient` for real-time updates
 
-```
-Project developer                 Your backend                  Stellar / Soroban
-       │                                │                              │
-       │── POST /api/projects ────────▶│── deployCarbonCredit() ──────▶│ token deployed
-       │                                │── registry.mint(treasury) ──▶│ credits minted to platform custody
-       │                                │                              │
-Corporate buyer                         │                              │
-       │── POST /api/purchase ────────▶│  record buyer's internal balance (your DB)
-       │── POST /api/retire ──────────▶│── registry.retire() ─────────▶│ credits burned, RetirementRecord written
-       │                                │                              │
-Public visitor                          │                              │
-       │── GET /api/registry ─────────▶│── registry.getRetirement() ──▶│ (per-token history)
-       │  (real-time) ──────────────────│── indexer.registerWebhook() ─▶│ (cross-token, live)
+```mermaid
+sequenceDiagram
+    participant Developer as Project developer
+    participant Buyer as Corporate buyer
+    participant Visitor as Public visitor
+    participant Backend as Your backend
+    participant Stellar as Stellar / Soroban
+
+    Developer->>Backend: POST /api/projects
+    Backend->>Stellar: deployCarbonCredit()
+    Note right of Stellar: token deployed
+    Backend->>Stellar: registry.mint(treasury)
+    Note right of Stellar: credits minted to platform custody
+
+    Buyer->>Backend: POST /api/purchase
+    Note over Backend: record buyer's internal balance (your DB)
+    Buyer->>Backend: POST /api/retire
+    Backend->>Stellar: registry.retire()
+    Note right of Stellar: credits burned, RetirementRecord written
+
+    Visitor->>Backend: GET /api/registry
+    Backend->>Stellar: registry.getRetirement()
+    Note right of Stellar: per-token history
+
+    opt Real-time
+        Backend->>Stellar: indexer.registerWebhook()
+        Note right of Stellar: cross-token, live
+    end
 ```
 
 ## Prerequisites

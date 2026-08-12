@@ -12,18 +12,31 @@ A farmer deposits cocoa or maize into a certified warehouse instead of selling i
 - An off-ramp endpoint that lets the farmer convert receipt value to mobile money or bank payout via `RampManager`
 - A scheduled job that marks receipts `EXPIRED` once their `expiryDate` passes
 
-```
-Warehouse operator                Your backend                  Stellar / Soroban
-       │                               │                              │
-       │── POST /api/deposits ────────▶│── deployCommodity() ────────▶│ receipt token deployed
-       │                               │── registry.mint(farmer) ────▶│ receipt shares minted
-       │                               │                              │
-Farmer │                               │                              │
-       │── POST /api/cash-out ────────▶│── ramp.initiateOffRamp() ───▶│ (off-chain provider)
-       │◀──────── payout initiated ────│── ramp.depositOffRamp() ────▶│ tokens custodied
-       │                               │                              │
-       │   (nightly cron) ─────────────│── registry.isExpired() ─────▶│
-       │                               │── registry.markExpired() ───▶│ status → EXPIRED
+```mermaid
+sequenceDiagram
+    participant Operator as Warehouse operator
+    participant Farmer
+    participant Backend as Your backend
+    participant Provider as Ramp provider
+    participant Stellar as Stellar / Soroban
+
+    Operator->>Backend: POST /api/deposits
+    Backend->>Stellar: deployCommodity()
+    Note right of Stellar: receipt token deployed
+    Backend->>Stellar: registry.mint(farmer)
+    Note right of Stellar: receipt shares minted
+
+    Farmer->>Backend: POST /api/cash-out
+    Backend->>Provider: ramp.initiateOffRamp()
+    Backend-->>Farmer: payout initiated
+    Backend->>Stellar: ramp.depositOffRamp()
+    Note right of Stellar: tokens custodied
+
+    loop Nightly cron
+        Backend->>Stellar: registry.isExpired()
+        Backend->>Stellar: registry.markExpired()
+        Note right of Stellar: status → EXPIRED
+    end
 ```
 
 ## Prerequisites

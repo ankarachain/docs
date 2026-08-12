@@ -13,17 +13,32 @@ A single Lagos office building is too expensive for most individual investors �
 - A quarterly rental distribution job: compute each holder's share off-chain, pay them, then call `declareRentalDistribution()` to publish an immutable on-chain record of the total distributed
 - A React dashboard showing a property's live occupancy, valuation, and the investor's share count
 
-```
-Property admin                    Your backend                  Stellar / Soroban
-      │                                 │                              │
-      │── POST /api/properties ────────▶│── deployRealEstate() ───────▶│ token deployed
-      │── POST /api/investors ─────────▶│── registry.mint() ──────────▶│ shares minted
-      │                                 │                              │
-      │  (tenant moves in) ────────────▶│── updateOccupancyStatus() ──▶│ status updated
-      │                                 │                              │
-      │  (quarterly) ───────────────────│  compute payouts off-chain
-      │                                 │  pay each holder via bank/mobile-money
-      │                                 │── declareRentalDistribution()▶ on-chain audit record
+```mermaid
+sequenceDiagram
+    participant Admin as Property admin
+    participant Backend as Your backend
+    participant Stellar as Stellar / Soroban
+
+    Admin->>Backend: POST /api/properties
+    Backend->>Stellar: deployRealEstate()
+    Note right of Stellar: token deployed
+
+    Admin->>Backend: POST /api/investors
+    Backend->>Stellar: registry.mint()
+    Note right of Stellar: shares minted
+
+    opt Tenant moves in
+        Admin->>Backend: notify occupancy change
+        Backend->>Stellar: updateOccupancyStatus()
+        Note right of Stellar: status updated
+    end
+
+    opt Quarterly
+        Note over Backend: compute payouts off-chain
+        Note over Backend: pay each holder via bank/mobile-money
+        Backend->>Stellar: declareRentalDistribution()
+        Note right of Stellar: on-chain audit record
+    end
 ```
 
 ## Prerequisites
