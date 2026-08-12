@@ -13,19 +13,39 @@ A licensed gold concession in Ashanti generates royalty income for whoever holds
 - A borrowing flow: a holder locks royalty tokens as collateral and draws a stablecoin loan via `CollateralVault`
 - A React panel showing a holder's token balance alongside their open loan's live loan-to-value ratio
 
-```
-Licence admin                     Your backend                  Stellar / Soroban
-      │                                 │                              │
-      │── POST /api/concessions ───────▶│── deployMiningRights() ─────▶│ token deployed
-      │                                 │                              │
-      │  (quarterly) ───────────────────│── declareRoyalty() ─────────▶│ on-chain declaration
-      │  (nightly cron) ────────────────│── isLicenseExpired() ───────▶│
-      │                                 │── markLicenseExpired() ─────▶│ status → EXPIRED
-      │                                                                │
-Holder                                                                 │
-      │── POST /api/loans/open ────────▶│── vault.openLoan() ─────────▶│ collateral locked, stablecoin borrowed
-      │── GET /api/loans/:id ───────────▶│── vault.currentLtvBps() ────▶│ live LTV check
-      │── POST /api/loans/:id/repay ────▶│── vault.repayLoan() ────────▶│ collateral released
+```mermaid
+sequenceDiagram
+    participant Admin as Licence admin
+    participant Holder
+    participant Backend as Your backend
+    participant Stellar as Stellar / Soroban
+
+    Admin->>Backend: POST /api/concessions
+    Backend->>Stellar: deployMiningRights()
+    Note right of Stellar: token deployed
+
+    opt Quarterly
+        Backend->>Stellar: declareRoyalty()
+        Note right of Stellar: on-chain declaration
+    end
+
+    loop Nightly cron
+        Backend->>Stellar: isLicenseExpired()
+        Backend->>Stellar: markLicenseExpired()
+        Note right of Stellar: status → EXPIRED
+    end
+
+    Holder->>Backend: POST /api/loans/open
+    Backend->>Stellar: vault.openLoan()
+    Note right of Stellar: collateral locked, stablecoin borrowed
+
+    Holder->>Backend: GET /api/loans/:id
+    Backend->>Stellar: vault.currentLtvBps()
+    Note right of Stellar: live LTV check
+
+    Holder->>Backend: POST /api/loans/:id/repay
+    Backend->>Stellar: vault.repayLoan()
+    Note right of Stellar: collateral released
 ```
 
 ## Prerequisites

@@ -10,20 +10,26 @@ Milestone escrow lets two parties execute a multi-tranche deal without trusting 
 
 ## How it works
 
-```
-Payer                     Contract                    Payee
-  │                           │                          │
-  │─── deployEscrow() ───────▶│                          │
-  │─── fund(milestoneId) ────▶│                          │
-  │                           │◀─── markDelivered() ─────│
-  │◀─── review deliverable ───│                          │
-  │─── approveMilestone() ───▶│─── release funds ───────▶│
-  │                           │                          │
-  │  (if dispute)             │                          │
-  │─── raiseDispute() ───────▶│◀───── raiseDispute() ────│
-  │                     Arbiter                          │
-  │                     resolveDispute(true/false)       │
-  │                           │─── release / refund ────▶│
+```mermaid
+sequenceDiagram
+    participant Payer
+    participant Contract
+    participant Payee
+    participant Arbiter
+
+    Payer->>Contract: deployEscrow()
+    Payer->>Contract: fund(milestoneId)
+    Payee->>Contract: markDelivered()
+    Contract-->>Payer: review deliverable
+    Payer->>Contract: approveMilestone()
+    Contract->>Payee: release funds
+
+    opt Dispute raised
+        Payer->>Contract: raiseDispute()
+        Payee->>Contract: raiseDispute()
+        Arbiter->>Contract: resolveDispute(true/false)
+        Contract->>Payee: release / refund
+    end
 ```
 
 Each milestone in the array is funded and settled independently — the payer can pay in installments rather than depositing the entire contract value up front.

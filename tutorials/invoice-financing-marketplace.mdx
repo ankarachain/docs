@@ -13,18 +13,36 @@ A supplier ships goods and issues an invoice due in 90 days, but needs cash now 
 - A settlement endpoint that marks the invoice `REPAID` or `DEFAULTED` once the debtor's payment window closes
 - A nightly job that flags overdue invoices before they're marked in default
 
-```
-Supplier                          Your backend                  Stellar / Soroban
-   │                                    │                              │
-   │── POST /api/invoices ─────────────▶│── deployInvoice() ──────────▶│ token deployed (PENDING)
-   │                                    │                              │
-Investor                                │                              │
-   │── POST /api/invoices/:id/fund ────▶│── registry.mint(investor) ──▶│
-   │                                    │── registry.markFunded() ────▶│ status → FUNDED
-   │                                    │                              │
-   │  (debtor pays supplier's bank) ───▶│── registry.markRepaid() ────▶│ status → REPAID
-   │  (nightly cron) ───────────────────│── registry.isOverdue() ─────▶│ flag for review
-   │  (debtor never pays) ─────────────▶│── registry.markDefaulted() ─▶│ status → DEFAULTED
+```mermaid
+sequenceDiagram
+    participant Supplier
+    participant Investor
+    participant Debtor
+    participant Backend as Your backend
+    participant Stellar as Stellar / Soroban
+
+    Supplier->>Backend: POST /api/invoices
+    Backend->>Stellar: deployInvoice()
+    Note right of Stellar: token deployed (PENDING)
+
+    Investor->>Backend: POST /api/invoices/:id/fund
+    Backend->>Stellar: registry.mint(investor)
+    Backend->>Stellar: registry.markFunded()
+    Note right of Stellar: status → FUNDED
+
+    loop Nightly cron
+        Backend->>Stellar: registry.isOverdue()
+        Note right of Stellar: flag for review
+    end
+
+    alt Debtor pays supplier's bank
+        Debtor->>Backend: payment confirmed
+        Backend->>Stellar: registry.markRepaid()
+        Note right of Stellar: status → REPAID
+    else Debtor never pays
+        Backend->>Stellar: registry.markDefaulted()
+        Note right of Stellar: status → DEFAULTED
+    end
 ```
 
 ## Prerequisites

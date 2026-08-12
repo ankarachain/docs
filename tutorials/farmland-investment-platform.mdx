@@ -12,19 +12,30 @@ Farmland investment platforms let a diaspora investor in London or a saver in Na
 - An Express API with three routes: get an on-ramp quote, start an investment (fiat → shares), and a webhook that mints shares once the deposit settles
 - A React investor dashboard using `useAsset` and `useTokenBalance`
 
-```
-Investor (browser)                 Your backend                    Stellar / Soroban
-      │                                  │                                │
-      │── GET /api/quote ───────────────▶│── ramp.getQuote() ────────────▶│ (off-chain provider)
-      │◀───────────────── quote ─────────│                                │
-      │                                  │                                │
-      │── POST /api/invest ─────────────▶│── ramp.initiateOnRamp() ──────▶│ (off-chain provider)
-      │◀──────────── paymentUrl ─────────│                                │
-      │                                  │                                │
-      │  (investor pays NGN/KES) ───────▶│  provider webhook fires        │
-      │                                  │── registry.mint(investor) ────▶│ shares minted
-      │                                  │                                │
-      │── useAsset / useTokenBalance ────┼───────────────────────────────▶│ (read-only, no signer)
+```mermaid
+sequenceDiagram
+    participant Investor as Investor (browser)
+    participant Backend as Your backend
+    participant Provider as Ramp provider
+    participant Stellar as Stellar / Soroban
+
+    Investor->>Backend: GET /api/quote
+    Backend->>Provider: ramp.getQuote()
+    Provider-->>Backend: quote
+    Backend-->>Investor: quote
+
+    Investor->>Backend: POST /api/invest
+    Backend->>Provider: ramp.initiateOnRamp()
+    Provider-->>Backend: paymentUrl
+    Backend-->>Investor: paymentUrl
+
+    Investor->>Provider: pays NGN/KES
+    Provider->>Backend: webhook fires
+    Backend->>Stellar: registry.mint(investor)
+    Note right of Stellar: shares minted
+
+    Investor->>Stellar: useAsset / useTokenBalance
+    Note right of Stellar: read-only, no signer
 ```
 
 ## Prerequisites

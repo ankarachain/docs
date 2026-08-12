@@ -42,29 +42,27 @@ Each escrow holds:
 
 Each milestone moves through the following states independently. Other milestones in the same escrow are unaffected by a dispute or delivery on one.
 
-```
-PENDING (0)
-    │
-    ├──[payer: fund()]──────────────────────────────────────┐
-    │                                                       │
-    └──[payee: markDelivered()]──────► DELIVERED (1)        │
-                                          │                 │
-                           ┌─────────────┴────────────┐    │
-                           │                          │    │
-             [payer: approveMilestone()]  [payer: raiseDispute()]
-                           │                          │
-                           ▼                     DISPUTED (2)
-                      RELEASED (3)                    │
-                                         ┌────────────┴────────────┐
-                                         │                         │
-                           [arbiter: resolve(true)]   [arbiter: resolve(false)]
-                                         │                         │
-                                    RELEASED (3)             REFUNDED (4)
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
 
-         Also from DELIVERED:
-         [after timelockDurationSeconds, payee: claimTimelockRelease()]
-                                         │
-                                    RELEASED (3)
+    note left of PENDING
+        payer: fund(milestoneId)
+        (toggles the separate `funded`
+        flag — not a status transition)
+    end note
+
+    PENDING --> DELIVERED: payee — markDelivered()
+
+    DELIVERED --> RELEASED: payer — approveMilestone()
+    DELIVERED --> DISPUTED: payer — raiseDispute()
+    DELIVERED --> RELEASED: payee — claimTimelockRelease()\n(after timelockDurationSeconds)
+
+    DISPUTED --> RELEASED: arbiter — resolveDispute(true)
+    DISPUTED --> REFUNDED: arbiter — resolveDispute(false)
+
+    RELEASED --> [*]
+    REFUNDED --> [*]
 ```
 
 In TypeScript, the state values are the `MilestoneStatus` enum:
