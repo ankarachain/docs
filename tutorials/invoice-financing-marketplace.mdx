@@ -1,0 +1,194 @@
+---
+title: "Build an Invoice Financing Marketplace"
+sidebarTitle: "Invoice Financing Marketplace"
+description: "Build the bare bones of an invoice discounting marketplace: tokenize a receivable as an InvoiceToken, let an investor fund it at a discount, and track repayment or default on-chain."
+---
+
+A supplier ships goods and issues an invoice due in 90 days, but needs cash now — not in 90 days. An invoice financing marketplace lets an investor buy that receivable at a discount, front the supplier the cash immediately, and collect the full face value when the debtor eventually pays. This tutorial builds that flow around `InvoiceToken`'s own `PENDING → FUNDED → REPAID / DEFAULTED` lifecycle.
+
+## What you'll build
+
+- An endpoint that tokenizes a supplier's invoice as an `InvoiceToken`
+- A funding endpoint that mints the invoice token to the investor and marks it `FUNDED`
+- A settlement endpoint that marks the invoice `REPAID` or `DEFAULTED` once the debtor's payment window closes
+- A nightly job that flags overdue invoices before they're marked in default
+
+```
+Supplier                          Your backend                  Stellar / Soroban
+   │                                    │                              │
+   │── POST /api/invoices ─────────────▶│── deployInvoice() ──────────▶│ token deployed (PENDING)
+   │                                    │                              │
+Investor                                │                              │
+   │── POST /api/invoices/:id/fund ────▶│── registry.mint(investor) ──▶│
+   │                                    │── registry.markFunded() ────▶│ status → FUNDED
+   │                                    │                              │
+   │  (debtor pays supplier's bank) ───▶│── registry.markRepaid() ────▶│ status → REPAID
+   │  (nightly cron) ───────────────────│── registry.isOverdue() ─────▶│ flag for review
+   │  (debtor never pays) ─────────────▶│── registry.markDefaulted() ─▶│ status → DEFAULTED
+```
+
+## Prerequisites
+
+- Node.js 18+
+- A Stellar testnet account and secret key (`S...`), funded via the [Stellar Friendbot](https://friendbot.stellar.org)
+- `npm install @ankarachain/sdk express node-cron`
+
+---
+
+<Steps>
+  <Step title="Scaffold the project">
+    ```
+    invoice-marketplace/
+    ├── src/
+    │   ├── config.ts
+    │   ├── routes.ts             # tokenize, fund, settle
+    │   ├── jobs/
+    │   │   └── flagOverdue.ts     # nightly overdue sweep
+    │   └── server.ts
+    ├── ankara.config.json
+    ├── .env
+    └── package.json
+    ```
+
+    ```typescript src/config.ts
+    import { TokenFactory } from "@ankarachain/sdk";
+
+    export const factory = new TokenFactory({
+      network:          "stellar-testnet",
+      stellarSecretKey: process.env.STELLAR_SECRET_KEY!,
+      factoryAddress:   "CBMBI63UU6KJIZ5KUVP6A3FGMBMS4R3OXSY27NQNK5PPLCWJW7DPSEEF",
+    });
+    ```
+  </Step>
+
+  <Step title="Tokenize the invoice">
+    A supplier submits an invoice; you deploy an `InvoiceToken` representing it. Deployed tokens start in the base `AssetStatus.DRAFT` state, which the SDK's invoice lifecycle methods below drive forward. The same `deployInvoice()` call works unchanged on EVM — see [Deploy a Token](/guides/deploy-token) for that variant.
+
+    ```typescript src/routes.ts
+    import express from "express";
+    import { AssetRegistry } from "@ankarachain/sdk";
+    import { factory } from "./config";
+
+    export const router = express.Router();
+
+    router.post("/api/invoices", async (req, res) => {
+      const { invoiceNumber, debtorReference, faceValueUSD, discountRateBps, daysUntilDue, currency } = req.body;
+
+      const now = BigInt(Math.floor(Date.now() / 1000));
+
+      const result = await factory.deployInvoice({
+        name:        `Invoice ${invoiceNumber}`,
+        symbol:      "INV",
+        assetId:     invoiceNumber,
+        countryCode: "NG",
+        metadata: {
+          invoiceNumber,
+          debtorReference,
+          faceValueUSD:        BigInt(faceValueUSD) * 10n ** 18n,
+          discountRateBps:     BigInt(discountRateBps),   // e.g. 200n = 2%
+          issuanceDate:        now,
+          dueDate:             now + BigInt(daysUntilDue * 24 * 60 * 60),
+          invoiceDocumentHash: "0x" + "00".repeat(32),
+          currency,
+          lastUpdated:         now,
+        },
+      });
+
+      // Persist { tokenAddress: result.tokenAddress, invoiceNumber } to your DB here.
+
+      res.json({ tokenAddress: result.tokenAddress, txHash: result.txHash });
+    });
+    ```
+  </Step>
+
+  <Step title="Fund the invoice">
+    The investor pays the supplier the discounted amount off-chain (bank transfer), and in exchange receives the full-face-value invoice token. Mint it to them and flip the invoice to `FUNDED` in one call:
+
+    ```typescript src/routes.ts (continued)
+    router.post("/api/invoices/:tokenAddress/fund", async (req, res) => {
+      const { investorAddress, faceValueUSD } = req.body;
+      const registry = new AssetRegistry(factory.adapter, req.params.tokenAddress, "invoice");
+
+      await registry.mint(investorAddress, BigInt(faceValueUSD) * 10n ** 18n);
+      const txHash = await registry.markFunded();
+
+      res.json({ txHash });
+    });
+    ```
+
+    <Note>
+      `markFunded()` moves the token from `PENDING` to the base `AssetStatus.ACTIVE`. Only call it once the investor's discounted payment to the supplier has actually cleared — there's no on-chain check tying the mint to a real payment, so that guarantee is your platform's responsibility.
+    </Note>
+  </Step>
+
+  <Step title="Settle on repayment or default">
+    When the debtor pays the supplier the full face value at maturity, mark the invoice repaid — this moves it to `AssetStatus.REDEEMED`. If the debtor doesn't pay, mark it defaulted with a reason instead:
+
+    ```typescript src/routes.ts (continued)
+    router.post("/api/invoices/:tokenAddress/repay", async (req, res) => {
+      const registry = new AssetRegistry(factory.adapter, req.params.tokenAddress, "invoice");
+      const txHash   = await registry.markRepaid();
+      res.json({ txHash });
+    });
+
+    router.post("/api/invoices/:tokenAddress/default", async (req, res) => {
+      const registry = new AssetRegistry(factory.adapter, req.params.tokenAddress, "invoice");
+      const txHash   = await registry.markDefaulted(req.body.reason); // e.g. "Debtor insolvent — ref NG/2025/0042"
+      res.json({ txHash });
+    });
+    ```
+  </Step>
+
+  <Step title="Flag overdue invoices nightly">
+    ```typescript src/jobs/flagOverdue.ts
+    import cron from "node-cron";
+    import { AssetRegistry, InvoiceStatus } from "@ankarachain/sdk";
+    import { factory } from "../config";
+
+    async function flagOverdueInvoices(tokenAddresses: string[]) {
+      for (const tokenAddress of tokenAddresses) {
+        const registry = new AssetRegistry(factory.adapter, tokenAddress, "invoice");
+
+        if (await registry.isOverdue()) {
+          const status = await registry.getInvoiceStatus();
+          console.log(`${tokenAddress} is overdue, current status: ${InvoiceStatus[status]}`);
+          await notifyPlatformOps(tokenAddress); // your alerting — decide manually whether to markDefaulted
+        }
+      }
+    }
+
+    cron.schedule("0 2 * * *", async () => {
+      const funded = await listFundedInvoiceAddresses(); // your DB query
+      await flagOverdueInvoices(funded);
+    });
+    ```
+
+    <Tip>
+      `isOverdue()` returns `true` once `dueDate` has passed while the invoice is still `PENDING` or `FUNDED` — it does not automatically mark the invoice defaulted. Keep that decision (and the human review it usually needs) in your own backend, and call `markDefaulted()` explicitly.
+    </Tip>
+  </Step>
+</Steps>
+
+---
+
+## Going further
+
+- **Milestone-based funding** instead of a single lump-sum mint — e.g. releasing a first tranche on shipment confirmation and the rest on delivery — is exactly what `MilestoneEscrow` is built for. See the [Diaspora Construction Escrow tutorial](/tutorials/diaspora-construction-escrow) for the full escrow lifecycle applied to tranche payments.
+- **Secondary market**: since `InvoiceToken` is a standard fungible token, an investor holding a `FUNDED` invoice can transfer it to another investor before maturity — no extra SDK call needed.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="AssetRegistry" icon="database" href="/sdk/asset-registry">
+    Full reference for `markFunded`, `markRepaid`, `markDefaulted`, `isOverdue`.
+  </Card>
+  <Card title="Asset Templates" icon="layer-group" href="/concepts/asset-templates">
+    The full `InvoiceMetadata` schema and `InvoiceStatus` lifecycle.
+  </Card>
+  <Card title="TokenFactory" icon="factory" href="/sdk/token-factory">
+    Full reference for `deployInvoice`.
+  </Card>
+  <Card title="Diaspora Construction Escrow" icon="handshake" href="/tutorials/diaspora-construction-escrow">
+    A tranche-based alternative funding model using `MilestoneEscrow`.
+  </Card>
+</CardGroup>

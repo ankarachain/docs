@@ -46,6 +46,18 @@
             ]
           },
           {
+            "group": "Tutorials",
+            "pages": [
+              "tutorials/farmland-investment-platform",
+              "tutorials/commodity-warehouse-financing",
+              "tutorials/real-estate-income-platform",
+              "tutorials/invoice-financing-marketplace",
+              "tutorials/carbon-credit-marketplace",
+              "tutorials/mining-royalty-platform",
+              "tutorials/diaspora-construction-escrow"
+            ]
+          },
+          {
             "group": "CLI",
             "pages": [
               "cli/overview",
