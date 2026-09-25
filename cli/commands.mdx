@@ -737,6 +737,38 @@ ankara onramp-record
 
 ---
 
+## Payments
+
+These commands are Stellar-only. See [Payments](/contracts/payments).
+
+### `ankara batch-pay`
+
+Pays every recipient in a CSV file through a deployed `batch-disburser` contract, with up to 100 recipients per transaction.
+
+```bash
+ankara batch-pay [--contract <address>] [--token <address>] [--file payouts.csv] [--reference <text>] [-y]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--contract` | `batch-disburser` contract address |
+| `--token` | Token to pay in, for example the USDC SAC |
+| `--file` | CSV file with one `recipient,amount` row per line |
+| `--reference` | Text emitted in the on-chain event, for example `Payroll Sept 2026` |
+| `-y, --yes` | Skip the confirmation prompt for unattended runs, such as a monthly cron job |
+
+Amounts are integers in the token's smallest unit. A header row and `#` comment lines are allowed:
+
+```csv
+recipient,amount
+GA...WORKER1,1500000000
+GB...WORKER2,2200000000
+```
+
+Each transaction is atomic. If any recipient in a batch fails, for example because the token's identity verifier hasn't approved them, that whole batch reverts.
+
+---
+
 ## Oracle & Collateral
 
 ### `ankara oracle-set`

@@ -44,7 +44,20 @@ Restart Claude Desktop after saving. You will see **ankara-chain** listed under 
 
 ## Available Tools
 
-The MCP server exposes 24 tools, organised below by function. Tools that submit on-chain transactions require `rpcUrl` and `privateKey` fields. Read-only chain queries require only `rpcUrl`. Ramp provider tools (`get_ramp_quote`, `initiate_onramp`) interact with the off-chain ramp provider only and require neither field.
+## Networks and keys
+
+The server works on EVM networks and on Stellar. Each tool call carries its own connection arguments, so one running server can target any network or wallet.
+
+| Argument | EVM | Stellar |
+|---|---|---|
+| `network` | Optional. Defaults to `localhost`; also `polygon`, `polygon-amoy`, `ethereum`, `bnb`, `celo` | `stellar` or `stellar-testnet` |
+| `rpcUrl` | JSON-RPC URL (required) | Soroban RPC URL (optional, defaults per network) |
+| `privateKey` | Signer key, for write tools | Not used |
+| `stellarSecretKey` | Not used | Signer seed (`S…`), for write tools |
+
+Read-only tools need no key.
+
+The MCP server exposes 42 tools, organised below by function. On EVM, tools that submit on-chain transactions require `rpcUrl` and `privateKey`, and read-only chain queries require only `rpcUrl`. On Stellar, pass `network` and `stellarSecretKey` instead. Ramp provider tools (`get_ramp_quote`, `initiate_onramp`) interact with the off-chain ramp provider only and require neither field.
 
 ---
 
@@ -445,6 +458,46 @@ Reads the on-chain off-ramp deposit or on-ramp record for a given reference. **R
 | `rpcUrl` | `string` | ✅ | JSON-RPC endpoint |
 
 **Returns**: `{ treasury, offRamp: { depositor, token, amount, status } | null, onRamp: { recipient, token, amount, status } | null }`
+
+---
+
+## More tools
+
+These tools cover the rest of the SDK. Call `tools/list` from your MCP client for the full input schema of each one.
+
+### Tokens and assets
+
+| Tool | Description |
+|------|-------------|
+| `get_template_fields` | The metadata fields, units, defaults and allowed values for each of the 6 fungible templates. Makes no chain call. `deploy_token` uses these fields; omitted fields get the CLI's defaults. |
+| `transfer_tokens` / `transfer_nft` | Transfer fungible tokens or an NFT from the signer. |
+| `get_token_balance` | Token balance of an address. |
+| `get_asset_details` | Full asset record: supply, status, country, verifier, metadata and template state, such as invoice status, commodity expiry, carbon retirements and mining license expiry. |
+| `asset_action` | Lifecycle and template actions: `set_status`, `set_identity_verifier`, `pause`, `unpause`, `mint`, `update_valuation`, `update_occupancy_status`, `declare_rental_distribution`, `mark_expired`, `mark_funded`, `mark_repaid`, `mark_defaulted`, `retire`, `renew_license`, `mark_license_expired`, `declare_royalty`. |
+
+### Multi-token, pools and oracle
+
+| Tool | Description |
+|------|-------------|
+| `batch_register` / `batch_mint` | Register and mint commodity batches (warehouse receipts). |
+| `pool_deposit` / `pool_withdraw` / `get_pool_status` | Deposit to, withdraw from, and inspect a pool vault. |
+| `oracle_set_price` | Post a USD price on a manual oracle. |
+
+### Collateral vault (Stellar)
+
+| Tool | Description |
+|------|-------------|
+| `vault_open_loan` / `vault_repay_loan` / `vault_liquidate` | Borrower and liquidator actions on a collateral vault. |
+| `get_loan` | A loan with its live loan-to-value and liquidation status, or the vault's config if `loanId` is omitted. |
+
+### Escrow and indexer
+
+| Tool | Description |
+|------|-------------|
+| `vote_cancel_escrow` | Vote to cancel an escrow by mutual agreement. |
+| `query_indexer_events` | Query events from a running `@ankarachain/indexer`. |
+
+For which SDK methods the MCP server and CLI can and can't reach yet, see [`packages/mcp/COVERAGE.md`](https://github.com/ankarachain/ankara-core/blob/main/packages/mcp/COVERAGE.md).
 
 ---
 
