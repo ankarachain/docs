@@ -1,0 +1,18 @@
+# PR preview builds for the docs. Production stays on Mintlify
+# (docs.ankarachain.dev). Mintlify's own previews need a Pro plan, so
+# Netlify builds a static export of each pull request instead.
+#
+# Setup: create a Netlify site from ankarachain/docs with no base
+# directory. Netlify then comments a preview link on every PR.
+[build]
+  command = "npx -y mint@latest export && rm -rf dist && unzip -q -o export.zip -d dist && rm -f export.zip"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Keep preview copies out of search results; the real site is docs.ankarachain.dev.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Robots-Tag = "noindex"
