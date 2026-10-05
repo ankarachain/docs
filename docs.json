@@ -114,6 +114,19 @@
               "contracts/stellar",
               "contracts/escrow"
             ]
+          },
+          {
+            "group": "Stellar modules",
+            "pages": [
+              "contracts/identity",
+              "contracts/compliance",
+              "contracts/oracles",
+              "contracts/payments",
+              "contracts/income-and-liquidity",
+              "contracts/lending",
+              "contracts/insurance",
+              "contracts/pool-governance"
+            ]
           }
         ]
       }
